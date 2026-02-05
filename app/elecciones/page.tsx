@@ -78,7 +78,9 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 
-export default function EleccionesPage() {
+import { DashboardLayout } from "@/components/dashboard-layout"
+
+function EleccionesPageContent() {
   const { usuario } = useAuthStore()
   const isAdmin = useIsAdmin()
   const router = useRouter()
@@ -661,5 +663,13 @@ export default function EleccionesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function EleccionesPage() {
+  return (
+    <DashboardLayout>
+      <EleccionesPageContent />
+    </DashboardLayout>
   )
 }

@@ -35,7 +35,9 @@ import {
   type Candidato
 } from "@/lib/supabase"
 
-export default function VotarPage() {
+import { DashboardLayout } from "@/components/dashboard-layout"
+
+function VotarPageContent() {
   const { usuario } = useAuthStore()
   const [elecciones, setElecciones] = useState<Eleccion[]>([])
   const [loading, setLoading] = useState(true)
@@ -501,5 +503,13 @@ export default function VotarPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function VotarPage() {
+  return (
+    <DashboardLayout>
+      <VotarPageContent />
+    </DashboardLayout>
   )
 }

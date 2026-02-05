@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
-import { useAuthStore, useIsAdmin } from "@/store/auth-store"
+import { useAuthStore, useIsAdmin, useHasHydrated } from "@/store/auth-store"
 import { useState, useEffect } from "react"
 
 const navigationAdmin = [
@@ -51,17 +51,22 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const { usuario, logout, isAuthenticated, isLoading } = useAuthStore()
+  const usuario = useAuthStore((state) => state.usuario)
+  const logout = useAuthStore((state) => state.logout)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const hasHydrated = useHasHydrated()
   const isAdmin = useIsAdmin()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const navigation = isAdmin ? navigationAdmin : navigationVotante
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login")
+    // Solo redirigir cuando el store está hidratado y no hay autenticación
+    if (hasHydrated && !isAuthenticated) {
+      console.log("Dashboard - No autenticado, redirigiendo a login");
+      window.location.href = "/login"
     }
-  }, [isLoading, isAuthenticated, router])
+  }, [hasHydrated, isAuthenticated])
 
   const handleLogout = () => {
     logout()
@@ -82,7 +87,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     return page?.name || "Panel"
   }
 
-  if (isLoading) {
+  // Mostrar loading mientras se hidrata el store
+  if (!hasHydrated) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
@@ -96,7 +102,16 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   if (!isAuthenticated) {
-    return null
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-[#11357b] rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <Vote className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-gray-500">Cargando...</p>
+        </div>
+      </div>
+    )
   }
 
   return (

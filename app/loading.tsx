@@ -1,13 +1,14 @@
-import { Loader2, Vote } from "lucide-react"
+import { Loader2 } from "lucide-react"
 
-export default function Loading() {
+export default function DashboardLoading() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-[#11357b] rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <Vote className="w-8 h-8 text-white animate-pulse" />
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="text-center space-y-4">
+        <div className="relative">
+          <div className="w-16 h-16 border-4 border-gray-200 rounded-full"></div>
+          <div className="w-16 h-16 border-4 border-[#11357b] border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
         </div>
-        <Loader2 className="w-6 h-6 animate-spin text-[#11357b] mx-auto" />
+        <p className="text-gray-500 text-sm animate-pulse">Cargando...</p>
       </div>
     </div>
   )

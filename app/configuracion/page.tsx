@@ -24,8 +24,9 @@ import {
 import { useAuthStore } from "@/store/auth-store"
 import { actualizarUsuario, subirFoto, supabase } from "@/lib/supabase"
 import bcrypt from 'bcryptjs'
+import { DashboardLayout } from "@/components/dashboard-layout"
 
-export default function ConfiguracionPage() {
+function ConfiguracionPageContent() {
   const { usuario, updateUsuario } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
@@ -354,5 +355,13 @@ export default function ConfiguracionPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function ConfiguracionPage() {
+  return (
+    <DashboardLayout>
+      <ConfiguracionPageContent />
+    </DashboardLayout>
   )
 }

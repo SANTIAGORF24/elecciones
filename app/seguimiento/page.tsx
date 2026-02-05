@@ -46,7 +46,9 @@ interface EstadisticaUsuario {
   cargos_votados: number
 }
 
-export default function SeguimientoPage() {
+import { DashboardLayout } from "@/components/dashboard-layout"
+
+function SeguimientoPageContent() {
   const isAdmin = useIsAdmin()
   const router = useRouter()
   const [elecciones, setElecciones] = useState<Eleccion[]>([])
@@ -304,5 +306,13 @@ export default function SeguimientoPage() {
         </>
       )}
     </div>
+  )
+}
+
+export default function SeguimientoPage() {
+  return (
+    <DashboardLayout>
+      <SeguimientoPageContent />
+    </DashboardLayout>
   )
 }

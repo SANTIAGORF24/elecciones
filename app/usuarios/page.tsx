@@ -62,8 +62,9 @@ import {
   type Usuario 
 } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
+import { DashboardLayout } from "@/components/dashboard-layout"
 
-export default function UsuariosPage() {
+function UsuariosPageContent() {
   const { usuario: currentUser } = useAuthStore()
   const isAdmin = useIsAdmin()
   const router = useRouter()
@@ -652,5 +653,13 @@ export default function UsuariosPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function UsuariosPage() {
+  return (
+    <DashboardLayout>
+      <UsuariosPageContent />
+    </DashboardLayout>
   )
 }

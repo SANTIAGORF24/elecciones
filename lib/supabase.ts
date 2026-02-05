@@ -82,47 +82,56 @@ export interface HistorialPoderes {
 }
 
 // Funciones de autenticación
-export async function loginUsuario(cedula: string, password: string) {
-  const { data: usuario, error } = await supabase
+export async function loginUsuario(identificador: string, password: string) {
+  // Importar bcrypt al inicio
+  const bcrypt = await import("bcryptjs");
+  
+  // Buscar primero por cédula
+  let { data: usuario, error } = await supabase
     .from("usuarios")
     .select("*")
-    .eq("cedula", cedula)
+    .eq("cedula", identificador)
     .eq("activo", true)
     .single();
 
+  // Si no se encuentra por cédula, buscar por email
   if (error || !usuario) {
-    // Intentar con email
     const { data: usuarioEmail, error: errorEmail } = await supabase
       .from("usuarios")
       .select("*")
-      .eq("email", cedula)
+      .eq("email", identificador)
       .eq("activo", true)
       .single();
 
     if (errorEmail || !usuarioEmail) {
+      console.log("Login error - Usuario no encontrado:", identificador);
       return { error: "Usuario no encontrado o inactivo" };
     }
+    
+    usuario = usuarioEmail;
+  }
 
-    // Verificar contraseña
-    const bcrypt = await import("bcryptjs");
-    const isValid = await bcrypt.compare(password, usuarioEmail.password_hash);
-
-    if (!isValid) {
-      return { error: "Contraseña incorrecta" };
-    }
-
-    return { usuario: usuarioEmail as Usuario };
+  // Verificar que tengamos el usuario y su hash
+  if (!usuario || !usuario.password_hash) {
+    console.log("Login error - Sin password_hash");
+    return { error: "Error en la configuración del usuario" };
   }
 
   // Verificar contraseña
-  const bcrypt = await import("bcryptjs");
-  const isValid = await bcrypt.compare(password, usuario.password_hash);
+  try {
+    const isValid = await bcrypt.compare(password, usuario.password_hash);
+    
+    if (!isValid) {
+      console.log("Login error - Contraseña incorrecta para:", identificador);
+      return { error: "Contraseña incorrecta" };
+    }
 
-  if (!isValid) {
-    return { error: "Contraseña incorrecta" };
+    console.log("Login exitoso para:", usuario.nombre_completo);
+    return { usuario: usuario as Usuario };
+  } catch (err) {
+    console.log("Login error - Error al verificar contraseña:", err);
+    return { error: "Error al verificar contraseña" };
   }
-
-  return { usuario: usuario as Usuario };
 }
 
 // Funciones de usuarios

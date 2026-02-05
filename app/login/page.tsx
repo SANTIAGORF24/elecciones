@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Vote, Eye, EyeOff, Loader2, Shield, Users, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { loginUsuario } from "@/lib/supabase"
-import { useAuthStore } from "@/store/auth-store"
+import { useAuthStore, useHasHydrated } from "@/store/auth-store"
 
 export default function LoginPage() {
   const [cedula, setCedula] = useState("")
@@ -16,8 +16,20 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   const router = useRouter()
   const login = useAuthStore((state) => state.login)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const hasHydrated = useHasHydrated()
+
+  // Si ya está autenticado, redirigir al dashboard
+  useEffect(() => {
+    if (hasHydrated && isAuthenticated && !isRedirecting) {
+      console.log("Login - Ya autenticado, redirigiendo a dashboard")
+      setIsRedirecting(true)
+      window.location.href = "/"
+    }
+  }, [hasHydrated, isAuthenticated, isRedirecting])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,13 +46,30 @@ export default function LoginPage() {
       }
 
       if (result.usuario) {
+        console.log("Login exitoso, guardando usuario...")
         login(result.usuario)
-        router.push("/")
+        setIsRedirecting(true)
+        // Usar window.location para evitar problemas de hidratación
+        window.location.href = "/"
       }
     } catch (err) {
       setError("Error al iniciar sesión. Intente nuevamente.")
       setIsLoading(false)
     }
+  }
+
+  // Mostrar loading si está redirigiendo
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-[#11357b] rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <Vote className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-gray-500">Iniciando sesión...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
