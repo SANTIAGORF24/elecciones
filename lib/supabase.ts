@@ -163,6 +163,22 @@ export async function crearUsuario(
   return { data, error };
 }
 
+// Buscar usuario por cédula (sin contraseña, para votación pública)
+export async function buscarUsuarioPorCedula(cedula: string) {
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("id, cedula, nombre_completo, votos_base, poderes, activo, rol")
+    .eq("cedula", cedula)
+    .eq("activo", true)
+    .single();
+
+  if (error || !data) {
+    return { data: null, error: "Usuario no encontrado o inactivo" };
+  }
+
+  return { data, error: null };
+}
+
 export async function obtenerUsuarios() {
   const { data, error } = await supabase
     .from("usuarios")
