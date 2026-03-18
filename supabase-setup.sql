@@ -134,6 +134,21 @@ CREATE TABLE IF NOT EXISTS historial_poderes (
 CREATE INDEX IF NOT EXISTS idx_historial_poderes_usuario ON historial_poderes(usuario_id);
 
 -- =====================================================
+-- TABLA: eleccion_usuarios_permitidos
+-- Lista blanca de usuarios permitidos para votar en una eleccion
+-- =====================================================
+CREATE TABLE IF NOT EXISTS eleccion_usuarios_permitidos (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    eleccion_id UUID REFERENCES elecciones(id) ON DELETE CASCADE,
+    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+    UNIQUE(eleccion_id, usuario_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_eleccion_usuarios_permitidos_eleccion ON eleccion_usuarios_permitidos(eleccion_id);
+CREATE INDEX IF NOT EXISTS idx_eleccion_usuarios_permitidos_usuario ON eleccion_usuarios_permitidos(usuario_id);
+
+-- =====================================================
 -- FUNCIONES Y TRIGGERS
 -- =====================================================
 
@@ -245,6 +260,7 @@ ALTER TABLE candidatos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registro_votos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votos_secretos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE historial_poderes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eleccion_usuarios_permitidos ENABLE ROW LEVEL SECURITY;
 
 -- Política para usuarios (todos pueden leer, solo admin puede modificar)
 CREATE POLICY "Usuarios pueden ver su propio perfil" ON usuarios
@@ -256,6 +272,9 @@ CREATE POLICY "Solo admin puede insertar usuarios" ON usuarios
 CREATE POLICY "Solo admin puede actualizar usuarios" ON usuarios
     FOR UPDATE USING (true);
 
+CREATE POLICY "Solo admin puede eliminar usuarios" ON usuarios
+    FOR DELETE USING (true);
+
 -- Política para elecciones
 CREATE POLICY "Todos pueden ver elecciones" ON elecciones
     FOR SELECT USING (true);
@@ -265,6 +284,9 @@ CREATE POLICY "Solo admin puede crear elecciones" ON elecciones
 
 CREATE POLICY "Solo admin puede actualizar elecciones" ON elecciones
     FOR UPDATE USING (true);
+
+CREATE POLICY "Solo admin puede eliminar elecciones" ON elecciones
+    FOR DELETE USING (true);
 
 -- Política para cargos
 CREATE POLICY "Todos pueden ver cargos" ON cargos
@@ -300,6 +322,13 @@ CREATE POLICY "Ver historial de poderes" ON historial_poderes
 
 CREATE POLICY "Insertar historial de poderes" ON historial_poderes
     FOR INSERT WITH CHECK (true);
+
+-- Política para usuarios permitidos por elección
+CREATE POLICY "Ver usuarios permitidos por eleccion" ON eleccion_usuarios_permitidos
+    FOR SELECT USING (true);
+
+CREATE POLICY "Gestionar usuarios permitidos por eleccion" ON eleccion_usuarios_permitidos
+    FOR ALL USING (true) WITH CHECK (true);
 
 -- =====================================================
 -- DATOS INICIALES

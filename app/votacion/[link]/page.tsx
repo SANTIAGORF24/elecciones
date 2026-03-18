@@ -38,6 +38,7 @@ import {
   obtenerCargosPorEleccion,
   obtenerCandidatosPorCargo,
   registrarVotoMultiple,
+  usuarioPuedeVotarEleccion,
   supabase,
   type Eleccion,
   type Cargo,
@@ -143,6 +144,29 @@ export default function VotacionPublicaPage() {
     
     if (error || !data) {
       setErrorCedula("No se encontró un votante con esta cédula. Verifica e intenta de nuevo.")
+      setBuscando(false)
+      return
+    }
+
+    if (!eleccion) {
+      setErrorCedula("No se encontró una elección activa para validar el acceso.")
+      setBuscando(false)
+      return
+    }
+
+    const { permitido, error: errorPermiso } = await usuarioPuedeVotarEleccion(
+      eleccion.id,
+      data.id,
+    )
+
+    if (errorPermiso) {
+      setErrorCedula("No se pudo validar el permiso de votación. Intenta de nuevo.")
+      setBuscando(false)
+      return
+    }
+
+    if (!permitido) {
+      setErrorCedula("Tu usuario no está autorizado para votar en esta elección.")
       setBuscando(false)
       return
     }

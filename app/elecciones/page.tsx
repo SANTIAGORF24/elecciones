@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -65,9 +66,12 @@ import {
   actualizarEstadoEleccion,
   crearCargo,
   crearCandidato,
+  eliminarEleccion,
+  guardarUsuariosPermitidosPorEleccion,
   obtenerCargosPorEleccion,
   obtenerCandidatosPorEleccion,
   obtenerUsuarios,
+  obtenerUsuariosPermitidosPorEleccion,
   supabase,
   type Eleccion,
   type Cargo,
@@ -91,12 +95,16 @@ function EleccionesPageContent() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isCargoDialogOpen, setIsCargoDialogOpen] = useState(false)
   const [isCandidatoDialogOpen, setIsCandidatoDialogOpen] = useState(false)
+  const [isPermisosDialogOpen, setIsPermisosDialogOpen] = useState(false)
   const [selectedEleccion, setSelectedEleccion] = useState<Eleccion | null>(null)
   const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null)
   const [usuarioSearchOpen, setUsuarioSearchOpen] = useState(false)
   const [usuarioSearch, setUsuarioSearch] = useState("")
+  const [usuarioPermisoSearch, setUsuarioPermisoSearch] = useState("")
   const [cargos, setCargos] = useState<Record<string, Cargo[]>>({})
   const [candidatos, setCandidatos] = useState<Record<string, any[]>>({})
+  const [permitidosPorEleccion, setPermitidosPorEleccion] = useState<Record<string, string[]>>({})
+  const [usuariosPermitidosSeleccionados, setUsuariosPermitidosSeleccionados] = useState<string[]>([])
   const [copiedLink, setCopiedLink] = useState<string | null>(null)
   
   const [eleccionForm, setEleccionForm] = useState({
@@ -139,9 +147,17 @@ function EleccionesPageContent() {
       setElecciones(data)
       for (const eleccion of data) {
         await cargarCargosYCandidatos(eleccion.id)
+        await cargarPermitidosEleccion(eleccion.id)
       }
     }
     setLoading(false)
+  }
+
+  const cargarPermitidosEleccion = async (eleccionId: string) => {
+    const { data } = await obtenerUsuariosPermitidosPorEleccion(eleccionId)
+    if (data) {
+      setPermitidosPorEleccion((prev) => ({ ...prev, [eleccionId]: data }))
+    }
   }
 
   const cargarCargosYCandidatos = async (eleccionId: string) => {
@@ -186,6 +202,82 @@ function EleccionesPageContent() {
     } else {
       cargarElecciones()
     }
+  }
+
+  const handleEliminarEleccion = async (eleccion: Eleccion) => {
+    const confirmado = window.confirm(
+      `Vas a eliminar la eleccion "${eleccion.nombre}" y todos sus cargos, candidatos y votos. Esta accion no se puede deshacer.`,
+    )
+
+    if (!confirmado) return
+
+    setIsCreating(true)
+    const { error } = await eliminarEleccion(eleccion.id)
+
+    if (error) {
+      alert("Error al eliminar elección: " + error.message)
+    } else {
+      await cargarElecciones()
+      alert("Elección eliminada correctamente")
+    }
+
+    setIsCreating(false)
+  }
+
+  const handleAbrirPermisos = async (eleccion: Eleccion) => {
+    setSelectedEleccion(eleccion)
+    setUsuarioPermisoSearch("")
+    const permitidosActuales = permitidosPorEleccion[eleccion.id]
+    if (permitidosActuales) {
+      setUsuariosPermitidosSeleccionados(permitidosActuales)
+    } else {
+      const { data } = await obtenerUsuariosPermitidosPorEleccion(eleccion.id)
+      setUsuariosPermitidosSeleccionados(data || [])
+      if (data) {
+        setPermitidosPorEleccion((prev) => ({ ...prev, [eleccion.id]: data }))
+      }
+    }
+    setIsPermisosDialogOpen(true)
+  }
+
+  const handleTogglePermisoUsuario = (usuarioId: string, checked: boolean) => {
+    setUsuariosPermitidosSeleccionados((prev) => {
+      if (checked) {
+        return prev.includes(usuarioId) ? prev : [...prev, usuarioId]
+      }
+      return prev.filter((id) => id !== usuarioId)
+    })
+  }
+
+  const handleSeleccionarTodosPermisos = () => {
+    setUsuariosPermitidosSeleccionados(usuarios.map((u) => u.id))
+  }
+
+  const handleLimpiarPermisos = () => {
+    setUsuariosPermitidosSeleccionados([])
+  }
+
+  const handleGuardarPermisos = async () => {
+    if (!selectedEleccion) return
+
+    setIsCreating(true)
+    const { error } = await guardarUsuariosPermitidosPorEleccion(
+      selectedEleccion.id,
+      usuariosPermitidosSeleccionados,
+    )
+
+    if (error) {
+      alert("Error al guardar usuarios permitidos: " + error.message)
+    } else {
+      setPermitidosPorEleccion((prev) => ({
+        ...prev,
+        [selectedEleccion.id]: usuariosPermitidosSeleccionados,
+      }))
+      setIsPermisosDialogOpen(false)
+      alert("Permisos de votación actualizados")
+    }
+
+    setIsCreating(false)
   }
 
   const handleCrearCargo = async () => {
@@ -242,6 +334,11 @@ function EleccionesPageContent() {
   const filteredUsuarios = usuarios.filter(u => 
     u.nombre_completo.toLowerCase().includes(usuarioSearch.toLowerCase()) ||
     u.cedula.toLowerCase().includes(usuarioSearch.toLowerCase())
+  )
+
+  const usuariosFiltradosPermisos = usuarios.filter((u) =>
+    u.nombre_completo.toLowerCase().includes(usuarioPermisoSearch.toLowerCase()) ||
+    u.cedula.toLowerCase().includes(usuarioPermisoSearch.toLowerCase()),
   )
 
   const handleCopyLink = (link: string) => {
@@ -408,6 +505,21 @@ function EleccionesPageContent() {
                       <UserPlus className="w-4 h-4 mr-2" />
                       Agregar Candidato
                     </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleAbrirPermisos(eleccion)}
+                    >
+                      <Users className="w-4 h-4 mr-2" />
+                      Permitir Usuarios
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => handleEliminarEleccion(eleccion)}
+                      disabled={isCreating}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Eliminar Elección
+                    </Button>
                   </div>
 
                   {eleccion.link_publico && (
@@ -439,6 +551,12 @@ function EleccionesPageContent() {
 
                   <div className="space-y-4">
                     <h4 className="font-semibold text-gray-900">Cargos y Candidatos</h4>
+                    <div className="text-sm text-gray-500">
+                      Usuarios permitidos: {permitidosPorEleccion[eleccion.id]?.length || 0}
+                      {(!permitidosPorEleccion[eleccion.id] || permitidosPorEleccion[eleccion.id].length === 0) && (
+                        <span> (sin restricciones)</span>
+                      )}
+                    </div>
                     {!cargos[eleccion.id]?.length ? (
                       <p className="text-gray-500 text-sm">No hay cargos registrados</p>
                     ) : (
@@ -658,6 +776,82 @@ function EleccionesPageContent() {
               disabled={isCreating || !selectedUsuario}
             >
               {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Agregar Candidato"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para definir usuarios permitidos */}
+      <Dialog open={isPermisosDialogOpen} onOpenChange={setIsPermisosDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Permitir Usuarios</DialogTitle>
+            <DialogDescription>
+              Selecciona quiénes pueden votar en: {selectedEleccion?.nombre}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <Input
+              placeholder="Buscar por nombre o cédula..."
+              value={usuarioPermisoSearch}
+              onChange={(e) => setUsuarioPermisoSearch(e.target.value)}
+            />
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={handleSeleccionarTodosPermisos}>
+                Seleccionar todos
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={handleLimpiarPermisos}>
+                Limpiar selección
+              </Button>
+            </div>
+
+            <div className="text-xs text-gray-500">
+              Si no seleccionas ningún usuario, la elección quedará abierta para todos.
+            </div>
+
+            <div className="max-h-72 overflow-y-auto border rounded-md p-2 space-y-2">
+              {usuariosFiltradosPermisos.length === 0 ? (
+                <p className="text-sm text-gray-500 px-2 py-4">No se encontraron usuarios.</p>
+              ) : (
+                usuariosFiltradosPermisos.map((u) => (
+                  <label key={u.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-gray-50 cursor-pointer">
+                    <Checkbox
+                      checked={usuariosPermitidosSeleccionados.includes(u.id)}
+                      onCheckedChange={(checked) => handleTogglePermisoUsuario(u.id, checked === true)}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">{u.nombre_completo}</span>
+                      <span className="text-xs text-gray-500">Cédula: {u.cedula}</span>
+                    </div>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <div className="text-sm text-gray-600">
+              Seleccionados: <strong>{usuariosPermitidosSeleccionados.length}</strong>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPermisosDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-[#11357b] hover:bg-[#0d2a63]"
+              onClick={handleGuardarPermisos}
+              disabled={isCreating}
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                "Guardar Permisos"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -29,6 +29,7 @@ import {
   obtenerCargosPorEleccion,
   obtenerCandidatosPorCargo,
   registrarVotoMultiple,
+  usuarioPuedeVotarEleccion,
   supabase,
   type Eleccion,
   type Cargo,
@@ -58,13 +59,26 @@ function VotarPageContent() {
 
   useEffect(() => {
     cargarElecciones()
-  }, [])
+  }, [usuario])
 
   const cargarElecciones = async () => {
     setLoading(true)
     const { data } = await obtenerElecciones()
     if (data) {
-      setElecciones(data.filter(e => e.estado === 'activa'))
+      const activas = data.filter(e => e.estado === 'activa')
+
+      if (!usuario) {
+        setElecciones([])
+      } else {
+        const permisos = await Promise.all(
+          activas.map(async (eleccion) => {
+            const { permitido } = await usuarioPuedeVotarEleccion(eleccion.id, usuario.id)
+            return { eleccion, permitido }
+          }),
+        )
+
+        setElecciones(permisos.filter((p) => p.permitido).map((p) => p.eleccion))
+      }
     }
     setLoading(false)
   }

@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -49,7 +50,8 @@ import {
   Loader2,
   Users,
   Key,
-  AlertTriangle
+  AlertTriangle,
+  Upload
 } from "lucide-react"
 import { useAuthStore, useIsAdmin } from "@/store/auth-store"
 import { 
@@ -76,7 +78,11 @@ function UsuariosPageContent() {
   const [isPoderesDialogOpen, setIsPoderesDialogOpen] = useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null)
+  const [selectedUsuariosIds, setSelectedUsuariosIds] = useState<string[]>([])
+  const inputImportRef = useRef<HTMLInputElement | null>(null)
   
   const [formData, setFormData] = useState({
     cedula: "",
@@ -92,6 +98,34 @@ function UsuariosPageContent() {
   })
 
   const [nuevaContrasena, setNuevaContrasena] = useState("")
+
+  const normalizarCedula = (valor: string) => valor.replace(/\D/g, "")
+
+  const normalizarTexto = (valor: string) => valor.trim().replace(/\s+/g, " ")
+
+  const normalizarEncabezado = (valor: string) =>
+    valor
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "")
+
+  const obtenerValorColumna = (fila: Record<string, unknown>, aliases: string[]) => {
+    const mapa = new Map<string, unknown>()
+
+    for (const [key, value] of Object.entries(fila)) {
+      mapa.set(normalizarEncabezado(key), value)
+    }
+
+    for (const alias of aliases) {
+      const valor = mapa.get(normalizarEncabezado(alias))
+      if (valor !== undefined && valor !== null && String(valor).trim() !== "") {
+        return String(valor)
+      }
+    }
+
+    return ""
+  }
 
   useEffect(() => {
     if (!isAdmin) {
@@ -111,15 +145,17 @@ function UsuariosPageContent() {
   }
 
   const handleCrearUsuario = async () => {
-    if (!formData.cedula || !formData.nombre_completo || !formData.password) {
+    const cedulaNormalizada = normalizarCedula(formData.cedula)
+
+    if (!cedulaNormalizada || !formData.nombre_completo || !formData.password) {
       alert("Por favor completa todos los campos requeridos")
       return
     }
 
     setIsCreating(true)
     const { data, error } = await crearUsuario(
-      formData.cedula,
-      formData.nombre_completo,
+      cedulaNormalizada,
+      normalizarTexto(formData.nombre_completo),
       formData.password,
       formData.rol,
       formData.email || undefined
@@ -139,6 +175,100 @@ function UsuariosPageContent() {
       cargarUsuarios()
     }
     setIsCreating(false)
+  }
+
+  const handleImportarUsuarios = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    setIsImporting(true)
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const XLSX = await import("xlsx")
+      const workbook = XLSX.read(buffer, { type: "array" })
+      const firstSheetName = workbook.SheetNames[0]
+
+      if (!firstSheetName) {
+        throw new Error("El archivo no tiene hojas para importar")
+      }
+
+      const sheet = workbook.Sheets[firstSheetName]
+      const filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: "",
+      })
+
+      if (filas.length === 0) {
+        throw new Error("El archivo no contiene registros")
+      }
+
+      const cedulasExistentes = new Set(usuarios.map((u) => normalizarCedula(u.cedula)))
+      let creados = 0
+      let duplicados = 0
+      let invalidos = 0
+      const errores: string[] = []
+
+      for (const fila of filas) {
+        const nombreRaw = obtenerValorColumna(fila, ["nombre", "nombre completo", "nombres"])
+        const cedulaRaw = obtenerValorColumna(fila, [
+          "n cedula",
+          "n° cedula",
+          "numero cedula",
+          "no cedula",
+          "nro cedula",
+          "cedula",
+          "cédula",
+        ])
+
+        const nombre = normalizarTexto(nombreRaw)
+        const cedula = normalizarCedula(cedulaRaw)
+
+        if (!nombre || !cedula) {
+          invalidos++
+          continue
+        }
+
+        if (cedulasExistentes.has(cedula)) {
+          duplicados++
+          continue
+        }
+
+        const { error } = await crearUsuario(cedula, nombre, cedula, "votante")
+
+        if (error) {
+          const supabaseError = error as { code?: string; message: string }
+          if (supabaseError.code === "23505") {
+            duplicados++
+            continue
+          }
+          invalidos++
+          errores.push(`${nombre} (${cedula}): ${supabaseError.message}`)
+          continue
+        }
+
+        cedulasExistentes.add(cedula)
+        creados++
+      }
+
+      await cargarUsuarios()
+
+      let resumen = `Importacion finalizada\n\nCreados: ${creados}\nDuplicados: ${duplicados}\nInvalidos/Error: ${invalidos}\n\nRegla aplicada: cédula sin puntos como usuario y contraseña.`
+
+      if (errores.length > 0) {
+        resumen += `\n\nDetalle de errores (max 5):\n${errores.slice(0, 5).map((e) => `- ${e}`).join("\n")}`
+      }
+
+      alert(resumen)
+    } catch (error) {
+      const mensaje = error instanceof Error ? error.message : "No se pudo leer el archivo"
+      alert(`Error importando usuarios: ${mensaje}`)
+    } finally {
+      setIsImporting(false)
+      event.target.value = ""
+    }
   }
 
   const handleAsignarPoderes = async () => {
@@ -218,11 +348,66 @@ function UsuariosPageContent() {
     setIsCreating(false)
   }
 
+  const toggleUsuarioSeleccionado = (usuarioId: string, checked: boolean) => {
+    setSelectedUsuariosIds((prev) => {
+      if (checked) {
+        return prev.includes(usuarioId) ? prev : [...prev, usuarioId]
+      }
+      return prev.filter((id) => id !== usuarioId)
+    })
+  }
+
+  const handleSeleccionarTodos = (checked: boolean) => {
+    if (checked) {
+      setSelectedUsuariosIds(filteredUsuarios.map((u) => u.id))
+      return
+    }
+    setSelectedUsuariosIds([])
+  }
+
+  const usuariosSeleccionados = usuarios.filter((u) => selectedUsuariosIds.includes(u.id))
+  const usuariosSeleccionadosSinActual = usuariosSeleccionados.filter((u) => u.id !== currentUser?.id)
+
+  const handleEliminarUsuariosSeleccionados = async () => {
+    if (!usuariosSeleccionadosSinActual.length) {
+      alert("Selecciona al menos un usuario distinto al actual")
+      return
+    }
+
+    setIsCreating(true)
+    let eliminados = 0
+    const errores: string[] = []
+
+    for (const usuario of usuariosSeleccionadosSinActual) {
+      const { error } = await eliminarUsuario(usuario.id)
+      if (error) {
+        errores.push(`${usuario.nombre_completo}: ${error.message}`)
+        continue
+      }
+      eliminados++
+    }
+
+    await cargarUsuarios()
+    setSelectedUsuariosIds([])
+    setIsBulkDeleteDialogOpen(false)
+    setIsCreating(false)
+
+    let mensaje = `Eliminacion masiva finalizada\n\nEliminados: ${eliminados}\nErrores: ${errores.length}`
+
+    if (errores.length) {
+      mensaje += `\n\nDetalle (max 5):\n${errores.slice(0, 5).map((e) => `- ${e}`).join("\n")}`
+    }
+
+    alert(mensaje)
+  }
+
   const filteredUsuarios = usuarios.filter(u => 
     u.nombre_completo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.cedula.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (u.email && u.email.toLowerCase().includes(searchTerm.toLowerCase()))
   )
+
+  const todosSeleccionados = filteredUsuarios.length > 0 && filteredUsuarios.every((u) => selectedUsuariosIds.includes(u.id))
 
   if (!isAdmin) {
     return null
@@ -237,13 +422,39 @@ function UsuariosPageContent() {
           <p className="text-gray-500 mt-1">Administra los usuarios del sistema de votaciones</p>
         </div>
         
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-[#11357b] hover:bg-[#0d2a63]">
-              <UserPlus className="w-4 h-4 mr-2" />
-              Nuevo Usuario
-            </Button>
-          </DialogTrigger>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            ref={inputImportRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={handleImportarUsuarios}
+          />
+          <Button
+            variant="outline"
+            onClick={() => inputImportRef.current?.click()}
+            disabled={isImporting}
+          >
+            {isImporting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Importando...
+              </>
+            ) : (
+              <>
+                <Upload className="w-4 h-4 mr-2" />
+                Importar Excel
+              </>
+            )}
+          </Button>
+
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-[#11357b] hover:bg-[#0d2a63]">
+                <UserPlus className="w-4 h-4 mr-2" />
+                Nuevo Usuario
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Crear Nuevo Usuario</DialogTitle>
@@ -258,7 +469,7 @@ function UsuariosPageContent() {
                   id="cedula"
                   placeholder="Número de cédula"
                   value={formData.cedula}
-                  onChange={(e) => setFormData({...formData, cedula: e.target.value})}
+                  onChange={(e) => setFormData({...formData, cedula: normalizarCedula(e.target.value)})}
                 />
               </div>
               <div className="space-y-2">
@@ -326,20 +537,31 @@ function UsuariosPageContent() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Search */}
       <Card>
         <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Buscar por nombre, cédula o email..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="flex flex-col md:flex-row gap-3 md:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Buscar por nombre, cédula o email..."
+                className="pl-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="destructive"
+              onClick={() => setIsBulkDeleteDialogOpen(true)}
+              disabled={!usuariosSeleccionadosSinActual.length || isCreating}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Eliminar seleccionados ({usuariosSeleccionadosSinActual.length})
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -369,6 +591,13 @@ function UsuariosPageContent() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-gray-50">
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={todosSeleccionados}
+                        onCheckedChange={(checked) => handleSeleccionarTodos(checked === true)}
+                        aria-label="Seleccionar todos"
+                      />
+                    </TableHead>
                     <TableHead>Usuario</TableHead>
                     <TableHead className="hidden md:table-cell">Cédula</TableHead>
                     <TableHead>Rol</TableHead>
@@ -380,6 +609,13 @@ function UsuariosPageContent() {
                 <TableBody>
                   {filteredUsuarios.map((usuario) => (
                     <TableRow key={usuario.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedUsuariosIds.includes(usuario.id)}
+                          onCheckedChange={(checked) => toggleUsuarioSeleccionado(usuario.id, checked === true)}
+                          aria-label={`Seleccionar ${usuario.nombre_completo}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div>
                           <div className="font-medium">{usuario.nombre_completo}</div>
@@ -646,6 +882,51 @@ function UsuariosPageContent() {
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
                   Sí, Eliminar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para eliminar usuarios seleccionados */}
+      <Dialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              Eliminar Usuarios Seleccionados
+            </DialogTitle>
+            <DialogDescription>
+              Se eliminarán {usuariosSeleccionadosSinActual.length} usuarios seleccionados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm text-gray-600">
+            {usuariosSeleccionados.some((u) => u.id === currentUser?.id) && (
+              <p className="mb-2 text-amber-700">
+                Tu usuario actual no será eliminado por seguridad.
+              </p>
+            )}
+            <p>Esta acción no se puede deshacer.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBulkDeleteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleEliminarUsuariosSeleccionados}
+              disabled={isCreating || !usuariosSeleccionadosSinActual.length}
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Sí, Eliminar Seleccionados
                 </>
               )}
             </Button>

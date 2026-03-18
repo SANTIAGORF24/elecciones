@@ -81,11 +81,18 @@ export interface HistorialPoderes {
   created_at: string;
 }
 
+export interface EleccionUsuarioPermitido {
+  id: string;
+  eleccion_id: string;
+  usuario_id: string;
+  created_at: string;
+}
+
 // Funciones de autenticación
 export async function loginUsuario(identificador: string, password: string) {
   // Importar bcrypt al inicio
   const bcrypt = await import("bcryptjs");
-  
+
   // Buscar primero por cédula
   let { data: usuario, error } = await supabase
     .from("usuarios")
@@ -107,7 +114,7 @@ export async function loginUsuario(identificador: string, password: string) {
       console.log("Login error - Usuario no encontrado:", identificador);
       return { error: "Usuario no encontrado o inactivo" };
     }
-    
+
     usuario = usuarioEmail;
   }
 
@@ -120,7 +127,7 @@ export async function loginUsuario(identificador: string, password: string) {
   // Verificar contraseña
   try {
     const isValid = await bcrypt.compare(password, usuario.password_hash);
-    
+
     if (!isValid) {
       console.log("Login error - Contraseña incorrecta para:", identificador);
       return { error: "Contraseña incorrecta" };
@@ -201,6 +208,42 @@ export async function actualizarUsuario(id: string, updates: Partial<Usuario>) {
 
 export async function eliminarUsuario(id: string) {
   const { error } = await supabase.from("usuarios").delete().eq("id", id);
+
+  if (error?.code === "42501") {
+    return {
+      error: {
+        ...error,
+        message:
+          "Permiso denegado por RLS al eliminar usuario. Ejecuta la migracion supabase-migration-003-delete-fixes.sql en Supabase SQL Editor.",
+      },
+    };
+  }
+
+  if (error?.code === "23503") {
+    return {
+      error: {
+        ...error,
+        message:
+          "No se puede eliminar por referencias relacionadas. Ejecuta la migracion supabase-migration-003-delete-fixes.sql para ajustar FKs y politicas.",
+      },
+    };
+  }
+
+  return { error };
+}
+
+export async function eliminarEleccion(id: string) {
+  const { error } = await supabase.from("elecciones").delete().eq("id", id);
+
+  if (error?.code === "42501") {
+    return {
+      error: {
+        ...error,
+        message:
+          "Permiso denegado por RLS al eliminar eleccion. Ejecuta la migracion supabase-migration-003-delete-fixes.sql en Supabase SQL Editor.",
+      },
+    };
+  }
 
   return { error };
 }
@@ -321,6 +364,75 @@ export async function actualizarEstadoEleccion(
   return { data, error };
 }
 
+export async function obtenerUsuariosPermitidosPorEleccion(
+  eleccion_id: string,
+) {
+  const { data, error } = await supabase
+    .from("eleccion_usuarios_permitidos")
+    .select("usuario_id")
+    .eq("eleccion_id", eleccion_id);
+
+  return {
+    data: (data || []).map((item: { usuario_id: string }) => item.usuario_id),
+    error,
+  };
+}
+
+export async function guardarUsuariosPermitidosPorEleccion(
+  eleccion_id: string,
+  usuario_ids: string[],
+) {
+  const { error: deleteError } = await supabase
+    .from("eleccion_usuarios_permitidos")
+    .delete()
+    .eq("eleccion_id", eleccion_id);
+
+  if (deleteError) return { error: deleteError };
+
+  if (!usuario_ids.length) {
+    return { error: null };
+  }
+
+  const filas = usuario_ids.map((usuario_id) => ({ eleccion_id, usuario_id }));
+  const { error: insertError } = await supabase
+    .from("eleccion_usuarios_permitidos")
+    .insert(filas);
+
+  return { error: insertError };
+}
+
+export async function usuarioPuedeVotarEleccion(
+  eleccion_id: string,
+  usuario_id: string,
+) {
+  const { count: totalPermitidos, error: errorConteo } = await supabase
+    .from("eleccion_usuarios_permitidos")
+    .select("id", { count: "exact", head: true })
+    .eq("eleccion_id", eleccion_id);
+
+  if (errorConteo) {
+    return { permitido: false, error: errorConteo };
+  }
+
+  // Si no hay restricciones configuradas, la eleccion queda abierta para todos.
+  if (!totalPermitidos || totalPermitidos === 0) {
+    return { permitido: true, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from("eleccion_usuarios_permitidos")
+    .select("id")
+    .eq("eleccion_id", eleccion_id)
+    .eq("usuario_id", usuario_id)
+    .maybeSingle();
+
+  if (error) {
+    return { permitido: false, error };
+  }
+
+  return { permitido: Boolean(data), error: null };
+}
+
 // Funciones de cargos
 export async function crearCargo(
   eleccion_id: string,
@@ -401,6 +513,19 @@ export async function registrarVoto(
   candidato_id: string,
   cantidad_votos: number,
 ) {
+  const { permitido, error: permisoError } = await usuarioPuedeVotarEleccion(
+    eleccion_id,
+    usuario_id,
+  );
+
+  if (permisoError) {
+    return { error: permisoError };
+  }
+
+  if (!permitido) {
+    return { error: "No tienes permiso para votar en esta elección" };
+  }
+
   // Verificar si ya votó en este cargo
   const { data: votoExistente } = await supabase
     .from("registro_votos")
@@ -449,6 +574,19 @@ export async function registrarVotoMultiple(
   candidato_id: string,
   cantidad_votos: number,
 ) {
+  const { permitido, error: permisoError } = await usuarioPuedeVotarEleccion(
+    eleccion_id,
+    usuario_id,
+  );
+
+  if (permisoError) {
+    return { error: permisoError };
+  }
+
+  if (!permitido) {
+    return { error: "No tienes permiso para votar en esta elección" };
+  }
+
   // Obtener el usuario para saber sus votos disponibles
   const { data: usuario } = await supabase
     .from("usuarios")
