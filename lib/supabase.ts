@@ -277,10 +277,18 @@ export async function cambiarContrasena(id: string, nuevaContrasena: string) {
 
 export async function asignarPoderes(
   usuario_id: string,
-  poderes: number,
+  total_poderes: number,
   motivo: string,
   asignado_por: string,
 ) {
+  if (!Number.isInteger(total_poderes) || total_poderes < 0) {
+    return {
+      error: {
+        message: "El total de poderes debe ser un numero entero mayor o igual a 0",
+      },
+    };
+  }
+
   // Obtener poderes actuales
   const { data: usuario } = await supabase
     .from("usuarios")
@@ -288,12 +296,13 @@ export async function asignarPoderes(
     .eq("id", usuario_id)
     .single();
 
-  const nuevos_poderes = (usuario?.poderes || 0) + poderes;
+  const poderesActuales = usuario?.poderes || 0;
+  const deltaPoderes = total_poderes - poderesActuales;
 
   // Actualizar usuario
   const { error: updateError } = await supabase
     .from("usuarios")
-    .update({ poderes: nuevos_poderes })
+    .update({ poderes: total_poderes })
     .eq("id", usuario_id);
 
   if (updateError) return { error: updateError };
@@ -303,7 +312,7 @@ export async function asignarPoderes(
     .from("historial_poderes")
     .insert({
       usuario_id,
-      poderes_asignados: poderes,
+      poderes_asignados: deltaPoderes,
       motivo,
       asignado_por,
     })

@@ -93,7 +93,7 @@ function UsuariosPageContent() {
   })
   
   const [poderesData, setPoderesData] = useState({
-    cantidad: 1,
+    cantidad: 0,
     motivo: ""
   })
 
@@ -277,6 +277,11 @@ function UsuariosPageContent() {
       return
     }
 
+    if (poderesData.cantidad < 0) {
+      alert("La cantidad de poderes no puede ser negativa")
+      return
+    }
+
     setIsCreating(true)
     const { error } = await asignarPoderes(
       selectedUsuario.id,
@@ -289,7 +294,7 @@ function UsuariosPageContent() {
       alert("Error al asignar poderes: " + error.message)
     } else {
       setIsPoderesDialogOpen(false)
-      setPoderesData({ cantidad: 1, motivo: "" })
+      setPoderesData({ cantidad: 0, motivo: "" })
       setSelectedUsuario(null)
       cargarUsuarios()
     }
@@ -659,6 +664,7 @@ function UsuariosPageContent() {
                             <DropdownMenuItem 
                               onClick={() => {
                                 setSelectedUsuario(usuario)
+                                setPoderesData({ cantidad: usuario.poderes, motivo: "" })
                                 setIsPoderesDialogOpen(true)
                               }}
                             >
@@ -728,9 +734,9 @@ function UsuariosPageContent() {
       <Dialog open={isPoderesDialogOpen} onOpenChange={setIsPoderesDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Asignar Poderes</DialogTitle>
+            <DialogTitle>Editar Poderes</DialogTitle>
             <DialogDescription>
-              Asigna votos extra a {selectedUsuario?.nombre_completo}
+              Ajusta la cantidad total de poderes de {selectedUsuario?.nombre_completo}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -744,14 +750,17 @@ function UsuariosPageContent() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cantidad">Cantidad de poderes a agregar</Label>
+              <Label htmlFor="cantidad">Total de poderes</Label>
               <Input
                 id="cantidad"
                 type="number"
-                min="1"
+                min="0"
                 value={poderesData.cantidad}
-                onChange={(e) => setPoderesData({...poderesData, cantidad: parseInt(e.target.value) || 1})}
+                onChange={(e) => setPoderesData({...poderesData, cantidad: Math.max(0, parseInt(e.target.value) || 0)})}
               />
+              <p className="text-xs text-gray-500">
+                Puedes dejarlo en 0 para quitar todos los poderes o subirlo para agregar más.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="motivo">Motivo *</Label>
@@ -780,7 +789,7 @@ function UsuariosPageContent() {
               ) : (
                 <>
                   <Zap className="w-4 h-4 mr-2" />
-                  Asignar {poderesData.cantidad} poder(es)
+                    Guardar Poderes
                 </>
               )}
             </Button>
