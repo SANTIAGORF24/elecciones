@@ -96,6 +96,7 @@ export interface RegistroVotoCandidato {
   usuario_id: string;
   cargo_id: string;
   candidato_id: string;
+  bloque_votacion?: number;
   cantidad: number;
   created_at: string;
 }
@@ -650,21 +651,19 @@ export async function registrarVotoMultiple(
   if (eleccion.tipo === "fija") {
     const cantidadSolicitada = 1;
 
-    const { data: votoMismoCandidato } = await supabase
-      .from("registro_votos_candidatos")
-      .select("id")
-      .eq("eleccion_id", eleccion_id)
-      .eq("usuario_id", usuario_id)
-      .eq("cargo_id", cargo_id)
-      .eq("candidato_id", candidato_id)
-      .maybeSingle();
+    const { data: usuario } = await supabase
+      .from("usuarios")
+      .select("votos_base, poderes")
+      .eq("id", usuario_id)
+      .single();
 
-    if (votoMismoCandidato) {
-      return {
-        error:
-          "En elección fija solo puedes votar una vez por cada candidato en este cargo",
-      };
+    if (!usuario) {
+      return { error: "Usuario no encontrado" };
     }
+
+    const unidadesVoto = Math.max(1, usuario.votos_base + usuario.poderes);
+    const votosPorBloque = Math.max(1, eleccion.votos_fijos_por_cargo || 1);
+
     const { count, error: conteoError } = await supabase
       .from("registro_votos_candidatos")
       .select("id", { head: true, count: "exact" })
@@ -677,8 +676,26 @@ export async function registrarVotoMultiple(
     }
 
     const totalUsados = count || 0;
-    const votosDisponibles = Math.max(1, eleccion.votos_fijos_por_cargo || 1);
+    const votosDisponibles = votosPorBloque * unidadesVoto;
     const votosRestantes = votosDisponibles - totalUsados;
+    const bloqueActual = Math.floor(totalUsados / votosPorBloque);
+
+    const { data: votoMismoCandidato } = await supabase
+      .from("registro_votos_candidatos")
+      .select("id")
+      .eq("eleccion_id", eleccion_id)
+      .eq("usuario_id", usuario_id)
+      .eq("cargo_id", cargo_id)
+      .eq("candidato_id", candidato_id)
+      .eq("bloque_votacion", bloqueActual)
+      .maybeSingle();
+
+    if (votoMismoCandidato) {
+      return {
+        error:
+          "En elección fija solo puedes votar una vez por cada candidato en el bloque actual",
+      };
+    }
 
     if (cantidadSolicitada > votosRestantes) {
       return {
@@ -693,6 +710,7 @@ export async function registrarVotoMultiple(
         usuario_id,
         cargo_id,
         candidato_id,
+        bloque_votacion: bloqueActual,
         cantidad: 1,
       });
 
@@ -840,15 +858,26 @@ export async function registrarVotoMultiple(
 export async function obtenerCandidatosVotadosPorUsuario(
   eleccion_id: string,
   usuario_id: string,
+  bloque_votacion?: number,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("registro_votos_candidatos")
-    .select("cargo_id, candidato_id")
+    .select("cargo_id, candidato_id, bloque_votacion")
     .eq("eleccion_id", eleccion_id)
     .eq("usuario_id", usuario_id);
 
+  if (typeof bloque_votacion === "number") {
+    query = query.eq("bloque_votacion", bloque_votacion);
+  }
+
+  const { data, error } = await query;
+
   return {
-    data: (data || []) as Array<{ cargo_id: string; candidato_id: string }>,
+    data: (data || []) as Array<{
+      cargo_id: string;
+      candidato_id: string;
+      bloque_votacion?: number;
+    }>,
     error,
   };
 }
@@ -942,7 +971,8 @@ export async function obtenerEstadisticasVotacion(eleccion_id: string) {
     );
     const votosDisponibles =
       eleccion?.tipo === "fija"
-        ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+        ? Math.max(1, eleccion.votos_fijos_por_cargo || 1) *
+          Math.max(1, usuario.votos_base + usuario.poderes)
         : usuario.votos_base + usuario.poderes;
 
     return {

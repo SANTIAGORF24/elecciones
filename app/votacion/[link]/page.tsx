@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { 
   Vote, 
@@ -92,9 +92,11 @@ export default function VotacionPublicaPage() {
   const [successVotoDialog, setSuccessVotoDialog] = useState(false)
   const [animatingSuccess, setAnimatingSuccess] = useState(false)
 
+  const unidadesVoto = usuario ? Math.max(1, usuario.votos_base + usuario.poderes) : 0
+  const votosPorBloqueFijo = Math.max(1, eleccion?.votos_fijos_por_cargo || 1)
   const votosDisponibles = usuario
     ? eleccion?.tipo === "fija"
-      ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+      ? votosPorBloqueFijo * unidadesVoto
       : usuario.votos_base + usuario.poderes
     : 0
 
@@ -194,23 +196,45 @@ export default function VotacionPublicaPage() {
       setVotosRealizadosPorCargo(votosMap)
 
       const { data: votosPorCandidato } = await obtenerCandidatosVotadosPorUsuario(eleccion.id, data.id)
-      const candidatosMap: Record<string, string[]> = {}
-      votosPorCandidato?.forEach((item) => {
-        if (!candidatosMap[item.cargo_id]) {
-          candidatosMap[item.cargo_id] = []
-        }
-        if (!candidatosMap[item.cargo_id].includes(item.candidato_id)) {
-          candidatosMap[item.cargo_id].push(item.candidato_id)
-        }
-      })
-      setCandidatosVotadosPorCargo(candidatosMap)
 
       if (eleccion.tipo === "fija") {
         const votosMapFija: Record<string, number> = {}
-        Object.entries(candidatosMap).forEach(([cargoId, candidatosIds]) => {
-          votosMapFija[cargoId] = candidatosIds.length
+        votosPorCandidato?.forEach((item) => {
+          votosMapFija[item.cargo_id] = (votosMapFija[item.cargo_id] || 0) + 1
         })
         setVotosRealizadosPorCargo(votosMapFija)
+
+        const votosPorBloque = Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+        const bloqueActualPorCargo: Record<string, number> = {}
+        Object.keys(votosMapFija).forEach((cargoId) => {
+          bloqueActualPorCargo[cargoId] = Math.floor((votosMapFija[cargoId] || 0) / votosPorBloque)
+        })
+
+        const candidatosMap: Record<string, string[]> = {}
+        votosPorCandidato?.forEach((item) => {
+          const bloqueActual = bloqueActualPorCargo[item.cargo_id] || 0
+          const bloqueItem = item.bloque_votacion || 0
+          if (bloqueItem !== bloqueActual) return
+
+          if (!candidatosMap[item.cargo_id]) {
+            candidatosMap[item.cargo_id] = []
+          }
+          if (!candidatosMap[item.cargo_id].includes(item.candidato_id)) {
+            candidatosMap[item.cargo_id].push(item.candidato_id)
+          }
+        })
+        setCandidatosVotadosPorCargo(candidatosMap)
+      } else {
+        const candidatosMap: Record<string, string[]> = {}
+        votosPorCandidato?.forEach((item) => {
+          if (!candidatosMap[item.cargo_id]) {
+            candidatosMap[item.cargo_id] = []
+          }
+          if (!candidatosMap[item.cargo_id].includes(item.candidato_id)) {
+            candidatosMap[item.cargo_id].push(item.candidato_id)
+          }
+        })
+        setCandidatosVotadosPorCargo(candidatosMap)
       }
     }
 
@@ -224,6 +248,30 @@ export default function VotacionPublicaPage() {
   }
 
   const esEleccionFija = eleccion?.tipo === "fija"
+
+  const getBloqueActualInfo = (cargoId: string) => {
+    const usados = votosRealizadosPorCargo[cargoId] || 0
+    if (!esEleccionFija) {
+      return {
+        index: 0,
+        etiqueta: "Votación",
+        usadosEnBloque: usados,
+        limiteBloque: votosDisponibles,
+      }
+    }
+
+    const limiteBloque = votosPorBloqueFijo
+    const index = Math.floor(usados / limiteBloque)
+    const usadosEnBloque = usados >= votosDisponibles ? limiteBloque : usados % limiteBloque
+    const etiqueta = index === 0 ? "Tus votos" : `Poder ${index}`
+
+    return {
+      index,
+      etiqueta,
+      usadosEnBloque,
+      limiteBloque,
+    }
+  }
 
   const handleOpenConfirmDialog = (cargo: Cargo, candidato: Candidato) => {
     const restantes = getVotosRestantesCargo(cargo.id)
@@ -252,21 +300,41 @@ export default function VotacionPublicaPage() {
     if (error) {
       alert(typeof error === 'string' ? error : 'Error al registrar voto')
     } else {
-      setVotosRealizadosPorCargo(prev => ({
-        ...prev,
-        [confirmDialog.cargo!.id]: (prev[confirmDialog.cargo!.id] || 0) + votosARegistrar
-      }))
       if (esEleccionFija) {
+        const cargoId = confirmDialog.cargo!.id
+        const candidatoId = confirmDialog.candidato!.id
+        const votosAntes = votosRealizadosPorCargo[cargoId] || 0
+        const votosDespues = votosAntes + votosARegistrar
+        const bloqueAntes = Math.floor(votosAntes / votosPorBloqueFijo)
+        const bloqueDespues = Math.floor(votosDespues / votosPorBloqueFijo)
+
+        setVotosRealizadosPorCargo(prev => ({
+          ...prev,
+          [cargoId]: votosDespues
+        }))
+
         setCandidatosVotadosPorCargo((prev) => {
           const cargoId = confirmDialog.cargo!.id
-          const candidatoId = confirmDialog.candidato!.id
           const actuales = prev[cargoId] || []
+
+          if (bloqueDespues !== bloqueAntes) {
+            return {
+              ...prev,
+              [cargoId]: [],
+            }
+          }
+
           if (actuales.includes(candidatoId)) return prev
           return {
             ...prev,
             [cargoId]: [...actuales, candidatoId],
           }
         })
+      } else {
+        setVotosRealizadosPorCargo(prev => ({
+          ...prev,
+          [confirmDialog.cargo!.id]: (prev[confirmDialog.cargo!.id] || 0) + votosARegistrar
+        }))
       }
       setSuccessVotoDialog(true)
     }
@@ -295,6 +363,7 @@ export default function VotacionPublicaPage() {
     setCedula("")
     setUsuario(null)
     setVotosRealizadosPorCargo({})
+    setCandidatosVotadosPorCargo({})
     setCargoActualIndex(0)
     setStep('cedula')
     setAnimatingSuccess(false)
@@ -471,8 +540,8 @@ export default function VotacionPublicaPage() {
                     </div>
                     {eleccion?.tipo === "fija" ? (
                       <div className="text-xs text-white/50 text-right">
-                        <p>Elección fija</p>
-                        <p>mismo número para todos</p>
+                        <p>{votosPorBloqueFijo} por bloque</p>
+                        <p>{unidadesVoto} bloque(s): tú + poderes</p>
                       </div>
                     ) : (
                       <div className="text-xs text-white/50 text-right">
@@ -524,6 +593,7 @@ export default function VotacionPublicaPage() {
               const votosUsados = votosRealizadosPorCargo[cargo.id] || 0
               const votosRestantes = votosDisponibles - votosUsados
               const yaUsoTodos = votosRestantes <= 0
+              const bloqueInfo = getBloqueActualInfo(cargo.id)
 
               return (
                 <Card className="border-0 shadow-xl overflow-hidden">
@@ -548,6 +618,11 @@ export default function VotacionPublicaPage() {
                     {cargo.descripcion && (
                       <CardDescription>{cargo.descripcion}</CardDescription>
                     )}
+                    {esEleccionFija && !yaUsoTodos && (
+                      <div className="text-xs text-gray-500">
+                        Etapa actual: <span className="font-semibold text-[#11357b]">{bloqueInfo.etiqueta}</span> ({bloqueInfo.usadosEnBloque}/{bloqueInfo.limiteBloque})
+                      </div>
+                    )}
                     {/* Barra de progreso visual */}
                     <div className="mt-3">
                       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -566,6 +641,11 @@ export default function VotacionPublicaPage() {
                         </div>
                         <p className="font-semibold text-green-800 text-lg">¡Completado!</p>
                         <p className="text-sm text-green-600 mt-1">Usaste todos tus votos en este cargo</p>
+                        {esEleccionFija && (
+                          <p className="text-xs text-green-700 mt-2">
+                            Completaste {unidadesVoto} bloque(s) de {votosPorBloqueFijo} voto(s)
+                          </p>
+                        )}
                         
                         {cargoActualIndex < cargos.length - 1 ? (
                           <Button 
@@ -739,7 +819,7 @@ export default function VotacionPublicaPage() {
             <DialogTitle>Confirmar Voto</DialogTitle>
             <DialogDescription>
               {esEleccionFija
-                ? "Elección fija: cada clic asigna 1 voto a un candidato distinto hasta completar tu cupo"
+                ? "Elección fija por bloques: completa tus votos y luego avanza a los votos de cada poder"
                 : "Selecciona cuántos votos usar para este candidato"}
             </DialogDescription>
           </DialogHeader>
@@ -773,6 +853,11 @@ export default function VotacionPublicaPage() {
                 <p className="text-xs text-gray-500 mt-1">
                   Te quedan {confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 0} voto(s) para repartir en este cargo
                 </p>
+                {confirmDialog.cargo && (
+                  <p className="text-xs text-[#11357b] mt-2 font-medium">
+                    Etapa actual: {getBloqueActualInfo(confirmDialog.cargo.id).etiqueta}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="bg-blue-50 p-4 rounded-xl">

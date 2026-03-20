@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_registro_votos_usuario ON registro_votos(usuario_
 
 -- =====================================================
 -- TABLA: registro_votos_candidatos
--- Registro por candidato para impedir votos duplicados al mismo candidato
+-- Registro por candidato y bloque para elecciones fijas con poderes
 -- =====================================================
 CREATE TABLE IF NOT EXISTS registro_votos_candidatos (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -117,9 +117,10 @@ CREATE TABLE IF NOT EXISTS registro_votos_candidatos (
     usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
     cargo_id UUID REFERENCES cargos(id) ON DELETE CASCADE,
     candidato_id UUID REFERENCES candidatos(id) ON DELETE CASCADE,
+    bloque_votacion INTEGER DEFAULT 0,
     cantidad INTEGER DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
-    UNIQUE(eleccion_id, usuario_id, cargo_id, candidato_id)
+    UNIQUE(eleccion_id, usuario_id, cargo_id, candidato_id, bloque_votacion)
 );
 
 CREATE INDEX IF NOT EXISTS idx_registro_votos_candidatos_eleccion ON registro_votos_candidatos(eleccion_id);
