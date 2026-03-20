@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -27,12 +28,14 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
-  Clock
+  Clock,
+  FileSpreadsheet
 } from "lucide-react"
 import { useIsAdmin } from "@/store/auth-store"
 import { 
   obtenerElecciones, 
   obtenerEstadisticasVotacion,
+  obtenerResultados,
   type Eleccion
 } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
@@ -56,6 +59,7 @@ function SeguimientoPageContent() {
   const [estadisticas, setEstadisticas] = useState<EstadisticaUsuario[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingStats, setLoadingStats] = useState(false)
+  const [exportandoExcel, setExportandoExcel] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) {
@@ -93,6 +97,101 @@ function SeguimientoPageContent() {
     await cargarEstadisticas(value)
   }
 
+  const handleExportarExcel = async () => {
+    if (!selectedEleccion || !eleccionActual) {
+      alert("Selecciona una elección para exportar")
+      return
+    }
+
+    setExportandoExcel(true)
+
+    try {
+      const [{ data: resultados }, { data: estadisticasActuales }, XLSX] = await Promise.all([
+        obtenerResultados(selectedEleccion),
+        obtenerEstadisticasVotacion(selectedEleccion),
+        import("xlsx"),
+      ])
+
+      const resultadosOrdenados = [...(resultados || [])].sort((a, b) => b.votos - a.votos)
+
+      const agrupadoPorCargo = new Map<string, Array<{ candidato: string; cargo: string; votos: number }>>()
+      resultadosOrdenados.forEach((item) => {
+        const listaCargo = agrupadoPorCargo.get(item.cargo) || []
+        listaCargo.push(item)
+        agrupadoPorCargo.set(item.cargo, listaCargo)
+      })
+
+      agrupadoPorCargo.forEach((lista, cargo) => {
+        agrupadoPorCargo.set(
+          cargo,
+          [...lista].sort((a, b) => b.votos - a.votos),
+        )
+      })
+
+      const podioRows = resultadosOrdenados.map((item, index) => {
+        const rankingCargo = agrupadoPorCargo.get(item.cargo) || []
+        const posicionEnCargo = rankingCargo.findIndex((c) => c.candidato === item.candidato)
+
+        return {
+          Eleccion: eleccionActual.nombre,
+          Tipo: eleccionActual.tipo,
+          PosicionGeneral: index + 1,
+          PodioGeneral: index < 3 ? "Si" : "No",
+          GanadorGeneral: index === 0 ? "Si" : "No",
+          Cargo: item.cargo,
+          Candidato: item.candidato,
+          Votos: item.votos,
+          PosicionEnCargo: posicionEnCargo >= 0 ? posicionEnCargo + 1 : "",
+          GanadorCargo: posicionEnCargo === 0 ? "Si" : "No",
+        }
+      })
+
+      const participacionRows = (estadisticasActuales || []).map((est) => {
+        const porcentaje = est.votos_disponibles > 0
+          ? ((est.votos_usados / est.votos_disponibles) * 100).toFixed(1)
+          : "0.0"
+
+        return {
+          Eleccion: eleccionActual.nombre,
+          Tipo: eleccionActual.tipo,
+          Usuario: est.nombre,
+          Estado: est.ha_votado ? "Voto" : "No voto",
+          VotosDisponibles: est.votos_disponibles,
+          VotosEjercidos: est.votos_usados,
+          PorcentajeUso: `${porcentaje}%`,
+          CargosVotados: est.cargos_votados,
+        }
+      })
+
+      const workbook = XLSX.utils.book_new()
+      const podioSheet = XLSX.utils.json_to_sheet(
+        podioRows.length
+          ? podioRows
+          : [{ Eleccion: eleccionActual.nombre, Tipo: eleccionActual.tipo, Nota: "Sin votos registrados" }],
+      )
+      const participacionSheet = XLSX.utils.json_to_sheet(
+        participacionRows.length
+          ? participacionRows
+          : [{ Eleccion: eleccionActual.nombre, Tipo: eleccionActual.tipo, Nota: "Sin datos de participacion" }],
+      )
+
+      XLSX.utils.book_append_sheet(workbook, podioSheet, "Podio")
+      XLSX.utils.book_append_sheet(workbook, participacionSheet, "Participacion")
+
+      const nombreBase = eleccionActual.nombre
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "")
+
+      XLSX.writeFile(workbook, `seguimiento-${nombreBase || "eleccion"}.xlsx`)
+    } catch (error) {
+      console.error("Error exportando Excel:", error)
+      alert("No se pudo exportar el Excel. Intenta nuevamente.")
+    } finally {
+      setExportandoExcel(false)
+    }
+  }
+
   const eleccionActual = elecciones.find(e => e.id === selectedEleccion)
   
   const totalUsuarios = estadisticas.length
@@ -113,6 +212,23 @@ function SeguimientoPageContent() {
             Monitorea la participación en las elecciones (sin revelar por quién votaron)
           </p>
         </div>
+        <Button
+          onClick={handleExportarExcel}
+          disabled={loading || loadingStats || !selectedEleccion || exportandoExcel}
+          className="bg-[#11357b] hover:bg-[#0d2a63]"
+        >
+          {exportandoExcel ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Exportando...
+            </>
+          ) : (
+            <>
+              <FileSpreadsheet className="w-4 h-4 mr-2" />
+              Exportar Excel
+            </>
+          )}
+        </Button>
       </div>
 
       {loading ? (

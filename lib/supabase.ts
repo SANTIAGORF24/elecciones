@@ -715,6 +715,19 @@ export async function registrarVotoMultiple(
       });
 
     if (detalleError) {
+      const constraintName = (detalleError as { constraint?: string }).constraint;
+      if (
+        (detalleError as { code?: string }).code === "23505" &&
+        (constraintName ===
+          "registro_votos_candidatos_eleccion_id_usuario_id_cargo_id_candidato_id_key" ||
+          constraintName ===
+            "registro_votos_candidatos_eleccion_id_usuario_id_cargo_id_c_key")
+      ) {
+        return {
+          error:
+            "La base de datos aun tiene la restriccion antigua de voto unico por candidato. Ejecuta la migracion 009 para habilitar bloques por poderes.",
+        };
+      }
       return { error: detalleError };
     }
 
