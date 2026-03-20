@@ -90,6 +90,16 @@ export interface EleccionUsuarioPermitido {
   created_at: string;
 }
 
+export interface RegistroVotoCandidato {
+  id: string;
+  eleccion_id: string;
+  usuario_id: string;
+  cargo_id: string;
+  candidato_id: string;
+  cantidad: number;
+  created_at: string;
+}
+
 // Funciones de autenticación
 export async function loginUsuario(identificador: string, password: string) {
   // Importar bcrypt al inicio
@@ -640,6 +650,24 @@ export async function registrarVotoMultiple(
   // En elección fija siempre se registra 1 voto por acción (un candidato a la vez).
   const cantidadSolicitada = eleccion.tipo === "fija" ? 1 : cantidad_votos;
 
+  if (eleccion.tipo === "fija") {
+    const { data: votoMismoCandidato } = await supabase
+      .from("registro_votos_candidatos")
+      .select("id")
+      .eq("eleccion_id", eleccion_id)
+      .eq("usuario_id", usuario_id)
+      .eq("cargo_id", cargo_id)
+      .eq("candidato_id", candidato_id)
+      .maybeSingle();
+
+    if (votoMismoCandidato) {
+      return {
+        error:
+          "En elección fija solo puedes votar una vez por cada candidato en este cargo",
+      };
+    }
+  }
+
   // Obtener el usuario para saber sus votos disponibles
   const { data: usuario } = await supabase
     .from("usuarios")
@@ -723,7 +751,43 @@ export async function registrarVotoMultiple(
     .select()
     .single();
 
-  return { data, error };
+  if (error) {
+    return { data, error };
+  }
+
+  if (eleccion.tipo === "fija") {
+    const { error: detalleError } = await supabase
+      .from("registro_votos_candidatos")
+      .insert({
+        eleccion_id,
+        usuario_id,
+        cargo_id,
+        candidato_id,
+        cantidad: 1,
+      });
+
+    if (detalleError) {
+      return { error: detalleError };
+    }
+  }
+
+  return { data, error: null };
+}
+
+export async function obtenerCandidatosVotadosPorUsuario(
+  eleccion_id: string,
+  usuario_id: string,
+) {
+  const { data, error } = await supabase
+    .from("registro_votos_candidatos")
+    .select("cargo_id, candidato_id")
+    .eq("eleccion_id", eleccion_id)
+    .eq("usuario_id", usuario_id);
+
+  return {
+    data: (data || []) as Array<{ cargo_id: string; candidato_id: string }>,
+    error,
+  };
 }
 
 export async function obtenerResultados(eleccion_id: string) {

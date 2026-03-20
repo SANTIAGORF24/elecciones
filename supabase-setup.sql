@@ -108,6 +108,25 @@ CREATE INDEX IF NOT EXISTS idx_registro_votos_eleccion ON registro_votos(eleccio
 CREATE INDEX IF NOT EXISTS idx_registro_votos_usuario ON registro_votos(usuario_id);
 
 -- =====================================================
+-- TABLA: registro_votos_candidatos
+-- Registro por candidato para impedir votos duplicados al mismo candidato
+-- =====================================================
+CREATE TABLE IF NOT EXISTS registro_votos_candidatos (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    eleccion_id UUID REFERENCES elecciones(id) ON DELETE CASCADE,
+    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+    cargo_id UUID REFERENCES cargos(id) ON DELETE CASCADE,
+    candidato_id UUID REFERENCES candidatos(id) ON DELETE CASCADE,
+    cantidad INTEGER DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+    UNIQUE(eleccion_id, usuario_id, cargo_id, candidato_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_registro_votos_candidatos_eleccion ON registro_votos_candidatos(eleccion_id);
+CREATE INDEX IF NOT EXISTS idx_registro_votos_candidatos_usuario ON registro_votos_candidatos(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_registro_votos_candidatos_cargo ON registro_votos_candidatos(cargo_id);
+
+-- =====================================================
 -- TABLA: votos_secretos
 -- Almacena los votos de forma anónima (sin relación al usuario)
 -- Solo se puede contar, NUNCA saber quién votó por quién
@@ -264,6 +283,7 @@ ALTER TABLE elecciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cargos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidatos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registro_votos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE registro_votos_candidatos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votos_secretos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE historial_poderes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE eleccion_usuarios_permitidos ENABLE ROW LEVEL SECURITY;
@@ -313,6 +333,13 @@ CREATE POLICY "Ver registro de votos" ON registro_votos
     FOR SELECT USING (true);
 
 CREATE POLICY "Insertar registro de votos" ON registro_votos
+    FOR INSERT WITH CHECK (true);
+
+-- Política para registro por candidato
+CREATE POLICY "Ver registro por candidato" ON registro_votos_candidatos
+    FOR SELECT USING (true);
+
+CREATE POLICY "Insertar registro por candidato" ON registro_votos_candidatos
     FOR INSERT WITH CHECK (true);
 
 -- Política para votos secretos (IMPORTANTE: nadie puede ver individualmente)
@@ -371,6 +398,7 @@ COMMENT ON TABLE elecciones IS 'Elecciones creadas en el sistema';
 COMMENT ON TABLE cargos IS 'Cargos disponibles para votar en cada elección';
 COMMENT ON TABLE candidatos IS 'Candidatos postulados para cada cargo';
 COMMENT ON TABLE registro_votos IS 'Registro de participación (quién votó, sin revelar por quién)';
+COMMENT ON TABLE registro_votos_candidatos IS 'Registro por candidato para prevenir voto duplicado al mismo candidato';
 COMMENT ON TABLE votos_secretos IS 'Votos anónimos - NUNCA relacionar con usuarios';
 COMMENT ON TABLE historial_poderes IS 'Historial de asignación de poderes/votos extra';
 

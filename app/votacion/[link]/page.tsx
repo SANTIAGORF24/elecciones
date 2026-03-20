@@ -37,6 +37,7 @@ import {
   obtenerEleccionPorLink,
   obtenerCargosPorEleccion,
   obtenerCandidatosPorCargo,
+  obtenerCandidatosVotadosPorUsuario,
   registrarVotoMultiple,
   usuarioPuedeVotarEleccion,
   supabase,
@@ -79,6 +80,7 @@ export default function VotacionPublicaPage() {
   const [cargos, setCargos] = useState<Cargo[]>([])
   const [candidatosPorCargo, setCandidatosPorCargo] = useState<Record<string, Candidato[]>>({})
   const [votosRealizadosPorCargo, setVotosRealizadosPorCargo] = useState<Record<string, number>>({})
+  const [candidatosVotadosPorCargo, setCandidatosVotadosPorCargo] = useState<Record<string, string[]>>({})
   const [cargoActualIndex, setCargoActualIndex] = useState(0)
   const [isVoting, setIsVoting] = useState(false)
   const [cantidadVotos, setCantidadVotos] = useState(1)
@@ -190,6 +192,18 @@ export default function VotacionPublicaPage() {
         votosMap[voto.cargo_id] = (votosMap[voto.cargo_id] || 0) + voto.votos_usados
       })
       setVotosRealizadosPorCargo(votosMap)
+
+      const { data: votosPorCandidato } = await obtenerCandidatosVotadosPorUsuario(eleccion.id, data.id)
+      const candidatosMap: Record<string, string[]> = {}
+      votosPorCandidato?.forEach((item) => {
+        if (!candidatosMap[item.cargo_id]) {
+          candidatosMap[item.cargo_id] = []
+        }
+        if (!candidatosMap[item.cargo_id].includes(item.candidato_id)) {
+          candidatosMap[item.cargo_id].push(item.candidato_id)
+        }
+      })
+      setCandidatosVotadosPorCargo(candidatosMap)
     }
 
     setBuscando(false)
@@ -234,6 +248,18 @@ export default function VotacionPublicaPage() {
         ...prev,
         [confirmDialog.cargo!.id]: (prev[confirmDialog.cargo!.id] || 0) + votosARegistrar
       }))
+      if (esEleccionFija) {
+        setCandidatosVotadosPorCargo((prev) => {
+          const cargoId = confirmDialog.cargo!.id
+          const candidatoId = confirmDialog.candidato!.id
+          const actuales = prev[cargoId] || []
+          if (actuales.includes(candidatoId)) return prev
+          return {
+            ...prev,
+            [cargoId]: [...actuales, candidatoId],
+          }
+        })
+      }
       setSuccessVotoDialog(true)
     }
 
@@ -554,10 +580,20 @@ export default function VotacionPublicaPage() {
                     ) : (
                       <div className="grid gap-3 sm:grid-cols-2">
                         {candidatosPorCargo[cargo.id]?.map((candidato) => (
+                          (() => {
+                            const yaVotoEsteCandidato =
+                              esEleccionFija &&
+                              (candidatosVotadosPorCargo[cargo.id] || []).includes(candidato.id)
+
+                            return (
                           <div
                             key={candidato.id}
-                            onClick={() => handleOpenConfirmDialog(cargo, candidato)}
-                            className="group border-2 border-gray-100 rounded-2xl p-4 hover:border-[#11357b] hover:shadow-lg cursor-pointer transition-all duration-200 hover:-translate-y-0.5"
+                            onClick={() => !yaVotoEsteCandidato && handleOpenConfirmDialog(cargo, candidato)}
+                            className={`group border-2 rounded-2xl p-4 transition-all duration-200 ${
+                              yaVotoEsteCandidato
+                                ? 'border-green-200 bg-green-50 cursor-not-allowed'
+                                : 'border-gray-100 hover:border-[#11357b] hover:shadow-lg cursor-pointer hover:-translate-y-0.5'
+                            }`}
                           >
                             <div className="flex items-center gap-3 mb-3">
                               <div className="w-14 h-14 bg-gradient-to-br from-[#11357b] to-[#1e5a9a] rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-lg group-hover:scale-105 transition-transform">
@@ -571,13 +607,29 @@ export default function VotacionPublicaPage() {
                               </div>
                             </div>
                             <Button 
-                              className="w-full bg-[#11357b]/10 text-[#11357b] hover:bg-[#11357b] hover:text-white font-semibold transition-all"
+                              className={`w-full font-semibold transition-all ${
+                                yaVotoEsteCandidato
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-100'
+                                  : 'bg-[#11357b]/10 text-[#11357b] hover:bg-[#11357b] hover:text-white'
+                              }`}
                               variant="ghost"
+                              disabled={yaVotoEsteCandidato}
                             >
-                              <Vote className="w-4 h-4 mr-2" />
-                              Votar
+                              {yaVotoEsteCandidato ? (
+                                <>
+                                  <Check className="w-4 h-4 mr-2" />
+                                  Ya votaste
+                                </>
+                              ) : (
+                                <>
+                                  <Vote className="w-4 h-4 mr-2" />
+                                  Votar
+                                </>
+                              )}
                             </Button>
                           </div>
+                            )
+                          })()
                         ))}
                         {!candidatosPorCargo[cargo.id]?.length && (
                           <p className="text-gray-400 col-span-full text-center py-8">
