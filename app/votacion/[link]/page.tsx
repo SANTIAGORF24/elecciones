@@ -579,14 +579,6 @@ export default function VotacionPublicaPage() {
 
             {/* Botones de navegación */}
             <div className="flex items-center justify-between">
-              <Button 
-                variant="ghost" 
-                onClick={handleNuevoVotante}
-                className="text-gray-500"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Cambiar votante
-              </Button>
               {!todosCargosVotados && Object.keys(votosRealizadosPorCargo).length > 0 && (
                 <Button 
                   variant="outline"
