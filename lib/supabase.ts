@@ -26,6 +26,8 @@ export interface Eleccion {
   nombre: string;
   descripcion?: string;
   estado: "pendiente" | "activa" | "finalizada";
+  tipo: "normal" | "fija";
+  votos_fijos_por_cargo?: number | null;
   fecha_inicio?: string;
   fecha_fin?: string;
   link_publico?: string;
@@ -305,6 +307,8 @@ export async function crearEleccion(
   nombre: string,
   descripcion?: string,
   created_by?: string,
+  tipo: "normal" | "fija" = "normal",
+  votos_fijos_por_cargo?: number,
 ) {
   const link_publico = `eleccion-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -314,6 +318,9 @@ export async function crearEleccion(
       nombre,
       descripcion,
       estado: "pendiente",
+      tipo,
+      votos_fijos_por_cargo:
+        tipo === "fija" ? Math.max(1, votos_fijos_por_cargo || 1) : null,
       link_publico,
       created_by,
     })
@@ -405,6 +412,16 @@ export async function usuarioPuedeVotarEleccion(
   eleccion_id: string,
   usuario_id: string,
 ) {
+  const { data: eleccion, error: errorEleccion } = await supabase
+    .from("elecciones")
+    .select("tipo")
+    .eq("id", eleccion_id)
+    .single();
+
+  if (errorEleccion || !eleccion) {
+    return { permitido: false, error: errorEleccion };
+  }
+
   const { count: totalPermitidos, error: errorConteo } = await supabase
     .from("eleccion_usuarios_permitidos")
     .select("id", { count: "exact", head: true })
@@ -414,9 +431,13 @@ export async function usuarioPuedeVotarEleccion(
     return { permitido: false, error: errorConteo };
   }
 
-  // Si no hay restricciones configuradas, la eleccion queda abierta para todos.
+  // Elecciones normales sin lista blanca quedan abiertas.
+  // Elecciones fijas sin participantes quedan cerradas.
   if (!totalPermitidos || totalPermitidos === 0) {
-    return { permitido: true, error: null };
+    return {
+      permitido: eleccion.tipo !== "fija",
+      error: null,
+    };
   }
 
   const { data, error } = await supabase
@@ -526,6 +547,25 @@ export async function registrarVoto(
     return { error: "No tienes permiso para votar en esta elección" };
   }
 
+  const { data: eleccion, error: errorEleccion } = await supabase
+    .from("elecciones")
+    .select("tipo, votos_fijos_por_cargo")
+    .eq("id", eleccion_id)
+    .single();
+
+  if (errorEleccion || !eleccion) {
+    return { error: "No se pudo cargar la configuración de la elección" };
+  }
+
+  if (
+    eleccion.tipo === "fija" &&
+    cantidad_votos > (eleccion.votos_fijos_por_cargo || 1)
+  ) {
+    return {
+      error: `Solo puedes usar hasta ${eleccion.votos_fijos_por_cargo || 1} votos por cargo en esta elección fija`,
+    };
+  }
+
   // Verificar si ya votó en este cargo
   const { data: votoExistente } = await supabase
     .from("registro_votos")
@@ -587,6 +627,19 @@ export async function registrarVotoMultiple(
     return { error: "No tienes permiso para votar en esta elección" };
   }
 
+  const { data: eleccion } = await supabase
+    .from("elecciones")
+    .select("tipo, votos_fijos_por_cargo")
+    .eq("id", eleccion_id)
+    .single();
+
+  if (!eleccion) {
+    return { error: "No se pudo cargar la configuración de la elección" };
+  }
+
+  // En elección fija siempre se registra 1 voto por acción (un candidato a la vez).
+  const cantidadSolicitada = eleccion.tipo === "fija" ? 1 : cantidad_votos;
+
   // Obtener el usuario para saber sus votos disponibles
   const { data: usuario } = await supabase
     .from("usuarios")
@@ -598,7 +651,10 @@ export async function registrarVotoMultiple(
     return { error: "Usuario no encontrado" };
   }
 
-  const votosDisponibles = usuario.votos_base + usuario.poderes;
+  const votosDisponibles =
+    eleccion.tipo === "fija"
+      ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+      : usuario.votos_base + usuario.poderes;
 
   // Obtener cuántos votos ya usó en este cargo
   const { data: votosUsados } = await supabase
@@ -612,13 +668,13 @@ export async function registrarVotoMultiple(
     votosUsados?.reduce((sum: number, v: any) => sum + v.votos_usados, 0) || 0;
   const votosRestantes = votosDisponibles - totalUsados;
 
-  if (cantidad_votos > votosRestantes) {
+  if (cantidadSolicitada > votosRestantes) {
     return {
       error: `Solo te quedan ${votosRestantes} votos disponibles para este cargo`,
     };
   }
 
-  if (cantidad_votos < 1) {
+  if (cantidadSolicitada < 1) {
     return { error: "Debes usar al menos 1 voto" };
   }
 
@@ -636,7 +692,7 @@ export async function registrarVotoMultiple(
     const { error: updateError } = await supabase
       .from("registro_votos")
       .update({
-        votos_usados: registroExistente.votos_usados + cantidad_votos,
+        votos_usados: registroExistente.votos_usados + cantidadSolicitada,
       })
       .eq("id", registroExistente.id);
 
@@ -649,7 +705,7 @@ export async function registrarVotoMultiple(
         eleccion_id,
         usuario_id,
         cargo_id,
-        votos_usados: cantidad_votos,
+        votos_usados: cantidadSolicitada,
       });
 
     if (registroError) return { error: registroError };
@@ -662,7 +718,7 @@ export async function registrarVotoMultiple(
       eleccion_id,
       cargo_id,
       candidato_id,
-      cantidad: cantidad_votos,
+      cantidad: cantidadSolicitada,
     })
     .select()
     .single();
@@ -714,11 +770,33 @@ export async function obtenerResultados(eleccion_id: string) {
 }
 
 export async function obtenerEstadisticasVotacion(eleccion_id: string) {
-  // Obtener todos los usuarios activos
-  const { data: usuarios } = await supabase
+  const { data: eleccion } = await supabase
+    .from("elecciones")
+    .select("tipo, votos_fijos_por_cargo")
+    .eq("id", eleccion_id)
+    .single();
+
+  let usuariosQuery = supabase
     .from("usuarios")
     .select("id, nombre_completo, votos_base, poderes")
     .eq("activo", true);
+
+  if (eleccion?.tipo === "fija") {
+    const { data: permitidos } = await supabase
+      .from("eleccion_usuarios_permitidos")
+      .select("usuario_id")
+      .eq("eleccion_id", eleccion_id);
+
+    const idsPermitidos = (permitidos || []).map((p: { usuario_id: string }) => p.usuario_id);
+
+    if (!idsPermitidos.length) {
+      return { data: [], error: null };
+    }
+
+    usuariosQuery = usuariosQuery.in("id", idsPermitidos);
+  }
+
+  const { data: usuarios } = await usuariosQuery;
 
   // Obtener registros de votación (quién votó, sin saber por quién)
   const { data: registros } = await supabase
@@ -733,7 +811,10 @@ export async function obtenerEstadisticasVotacion(eleccion_id: string) {
       (sum, v) => sum + v.votos_usados,
       0,
     );
-    const votosDisponibles = usuario.votos_base + usuario.poderes;
+    const votosDisponibles =
+      eleccion?.tipo === "fija"
+        ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+        : usuario.votos_base + usuario.poderes;
 
     return {
       usuario_id: usuario.id,

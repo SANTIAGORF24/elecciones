@@ -55,7 +55,15 @@ function VotarPageContent() {
   }>({ open: false, cargo: null, candidato: null })
   const [successDialog, setSuccessDialog] = useState(false)
 
-  const votosDisponibles = usuario ? usuario.votos_base + usuario.poderes : 0
+  const getVotosDisponiblesPorCargo = (eleccion: Eleccion | null) => {
+    if (!usuario) return 0
+    if (eleccion?.tipo === "fija") {
+      return Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+    }
+    return usuario.votos_base + usuario.poderes
+  }
+
+  const votosDisponibles = getVotosDisponiblesPorCargo(selectedEleccion)
 
   useEffect(() => {
     cargarElecciones()
@@ -197,9 +205,15 @@ function VotarPageContent() {
             <div className="flex items-center gap-4">
               <div className="text-center">
                 <span className="text-2xl font-bold text-[#11357b]">{votosDisponibles}</span>
-                <p className="text-xs text-gray-500">
-                  ({usuario?.votos_base} base + {usuario?.poderes} poderes)
-                </p>
+                {selectedEleccion?.tipo === "fija" ? (
+                  <p className="text-xs text-gray-500">
+                    elección fija (mismo número para todos)
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    ({usuario?.votos_base} base + {usuario?.poderes} poderes)
+                  </p>
+                )}
               </div>
               {selectedEleccion && (
                 <div className="text-center border-l pl-4">
@@ -244,7 +258,10 @@ function VotarPageContent() {
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <CardTitle className="text-lg">{eleccion.nombre}</CardTitle>
-                      <Badge className="bg-green-100 text-green-700">Activa</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-green-100 text-green-700">Activa</Badge>
+                        <Badge variant="outline">{eleccion.tipo === "fija" ? "Fija" : "Normal"}</Badge>
+                      </div>
                     </div>
                     {eleccion.descripcion && (
                       <CardDescription className="line-clamp-2">

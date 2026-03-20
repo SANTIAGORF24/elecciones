@@ -38,12 +38,18 @@ CREATE TABLE IF NOT EXISTS elecciones (
     nombre VARCHAR(255) NOT NULL,
     descripcion TEXT,
     estado VARCHAR(20) DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'activa', 'finalizada')),
+    tipo VARCHAR(20) DEFAULT 'normal' CHECK (tipo IN ('normal', 'fija')),
+    votos_fijos_por_cargo INTEGER,
     fecha_inicio TIMESTAMP WITH TIME ZONE,
     fecha_fin TIMESTAMP WITH TIME ZONE,
     link_publico VARCHAR(100) UNIQUE,
     created_by UUID REFERENCES usuarios(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+        CHECK (
+            (tipo = 'normal' AND votos_fijos_por_cargo IS NULL)
+            OR (tipo = 'fija' AND votos_fijos_por_cargo >= 1)
+        )
 );
 
 -- Índice para el link público
@@ -371,4 +377,6 @@ COMMENT ON TABLE historial_poderes IS 'Historial de asignación de poderes/votos
 COMMENT ON COLUMN usuarios.poderes IS 'Votos extra asignados al usuario';
 COMMENT ON COLUMN usuarios.votos_base IS 'Votos base que tiene cada usuario (normalmente 1)';
 COMMENT ON COLUMN elecciones.link_publico IS 'Link único para ver resultados en tiempo real';
+COMMENT ON COLUMN elecciones.tipo IS 'Tipo de elección: normal o fija';
+COMMENT ON COLUMN elecciones.votos_fijos_por_cargo IS 'En elecciones fijas define votos iguales por cargo para cada participante';
 COMMENT ON COLUMN votos_secretos.cantidad IS 'Cantidad de votos (puede ser > 1 si usuario tiene poderes)';

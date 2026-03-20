@@ -47,6 +47,7 @@ import {
   Plus, 
   Play, 
   Square, 
+  Vote,
   Users, 
   Link as LinkIcon, 
   Loader2,
@@ -101,15 +102,19 @@ function EleccionesPageContent() {
   const [usuarioSearchOpen, setUsuarioSearchOpen] = useState(false)
   const [usuarioSearch, setUsuarioSearch] = useState("")
   const [usuarioPermisoSearch, setUsuarioPermisoSearch] = useState("")
+  const [usuarioFijaSearch, setUsuarioFijaSearch] = useState("")
   const [cargos, setCargos] = useState<Record<string, Cargo[]>>({})
   const [candidatos, setCandidatos] = useState<Record<string, any[]>>({})
   const [permitidosPorEleccion, setPermitidosPorEleccion] = useState<Record<string, string[]>>({})
   const [usuariosPermitidosSeleccionados, setUsuariosPermitidosSeleccionados] = useState<string[]>([])
+  const [usuariosFijaSeleccionados, setUsuariosFijaSeleccionados] = useState<string[]>([])
   const [copiedLink, setCopiedLink] = useState<string | null>(null)
   
   const [eleccionForm, setEleccionForm] = useState({
     nombre: "",
-    descripcion: ""
+    descripcion: "",
+    tipo: "normal" as "normal" | "fija",
+    votos_fijos_por_cargo: 1,
   })
   
   const [cargoForm, setCargoForm] = useState({
@@ -178,21 +183,62 @@ function EleccionesPageContent() {
       return
     }
 
+    if (eleccionForm.tipo === "fija" && eleccionForm.votos_fijos_por_cargo < 1) {
+      alert("En una elección fija debes asignar al menos 1 voto por cargo")
+      return
+    }
+
+    if (eleccionForm.tipo === "fija" && usuariosFijaSeleccionados.length === 0) {
+      alert("En una elección fija debes seleccionar los usuarios que participarán")
+      return
+    }
+
     setIsCreating(true)
     const { data, error } = await crearEleccion(
       eleccionForm.nombre,
       eleccionForm.descripcion,
-      usuario?.id
+      usuario?.id,
+      eleccionForm.tipo,
+      eleccionForm.tipo === "fija" ? eleccionForm.votos_fijos_por_cargo : undefined,
     )
 
     if (error) {
       alert("Error al crear elección: " + error.message)
     } else {
+      if (data && eleccionForm.tipo === "fija") {
+        const { error: permisosError } = await guardarUsuariosPermitidosPorEleccion(
+          data.id,
+          usuariosFijaSeleccionados,
+        )
+        if (permisosError) {
+          alert("La elección se creó, pero falló la asignación de participantes: " + permisosError.message)
+        }
+      }
+
       setIsDialogOpen(false)
-      setEleccionForm({ nombre: "", descripcion: "" })
+      setEleccionForm({ nombre: "", descripcion: "", tipo: "normal", votos_fijos_por_cargo: 1 })
+      setUsuarioFijaSearch("")
+      setUsuariosFijaSeleccionados([])
       cargarElecciones()
     }
     setIsCreating(false)
+  }
+
+  const handleToggleUsuarioFija = (usuarioId: string, checked: boolean) => {
+    setUsuariosFijaSeleccionados((prev) => {
+      if (checked) {
+        return prev.includes(usuarioId) ? prev : [...prev, usuarioId]
+      }
+      return prev.filter((id) => id !== usuarioId)
+    })
+  }
+
+  const handleSeleccionarTodosFija = () => {
+    setUsuariosFijaSeleccionados(usuarios.map((u) => u.id))
+  }
+
+  const handleLimpiarSeleccionFija = () => {
+    setUsuariosFijaSeleccionados([])
   }
 
   const handleCambiarEstado = async (eleccion: Eleccion, nuevoEstado: 'pendiente' | 'activa' | 'finalizada') => {
@@ -341,10 +387,22 @@ function EleccionesPageContent() {
     u.cedula.toLowerCase().includes(usuarioPermisoSearch.toLowerCase()),
   )
 
+  const usuariosFiltradosFija = usuarios.filter((u) =>
+    u.nombre_completo.toLowerCase().includes(usuarioFijaSearch.toLowerCase()) ||
+    u.cedula.toLowerCase().includes(usuarioFijaSearch.toLowerCase()),
+  )
+
   const handleCopyLink = (link: string) => {
     const fullUrl = `${window.location.origin}/resultados/${link}`
     navigator.clipboard.writeText(fullUrl)
-    setCopiedLink(link)
+    setCopiedLink(`resultados-${link}`)
+    setTimeout(() => setCopiedLink(null), 2000)
+  }
+
+  const handleCopyVotacionLink = (link: string) => {
+    const fullUrl = `${window.location.origin}/votacion/${link}`
+    navigator.clipboard.writeText(fullUrl)
+    setCopiedLink(`votacion-${link}`)
     setTimeout(() => setCopiedLink(null), 2000)
   }
 
@@ -361,6 +419,13 @@ function EleccionesPageContent() {
     }
   }
 
+  const getTipoBadge = (tipo: Eleccion["tipo"]) => {
+    if (tipo === "fija") {
+      return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Fija</Badge>
+    }
+    return <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">Normal</Badge>
+  }
+
   if (!isAdmin) {
     return null
   }
@@ -374,7 +439,14 @@ function EleccionesPageContent() {
           <p className="text-gray-500 mt-1">Crea y administra las elecciones del sistema</p>
         </div>
         
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open)
+          if (!open) {
+            setEleccionForm({ nombre: "", descripcion: "", tipo: "normal", votos_fijos_por_cargo: 1 })
+            setUsuarioFijaSearch("")
+            setUsuariosFijaSeleccionados([])
+          }
+        }}>
           <DialogTrigger asChild>
             <Button className="bg-[#11357b] hover:bg-[#0d2a63]">
               <Plus className="w-4 h-4 mr-2" />
@@ -407,6 +479,87 @@ function EleccionesPageContent() {
                   onChange={(e) => setEleccionForm({...eleccionForm, descripcion: e.target.value})}
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tipoEleccion">Tipo de elección *</Label>
+                <Select
+                  value={eleccionForm.tipo}
+                  onValueChange={(value: "normal" | "fija") => setEleccionForm({
+                    ...eleccionForm,
+                    tipo: value,
+                  })}
+                >
+                  <SelectTrigger id="tipoEleccion">
+                    <SelectValue placeholder="Selecciona el tipo de elección" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Elección normal</SelectItem>
+                    <SelectItem value="fija">Elección fija</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {eleccionForm.tipo === "fija" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="votosFijos">Votos por cargo para cada participante *</Label>
+                    <Input
+                      id="votosFijos"
+                      type="number"
+                      min={1}
+                      value={eleccionForm.votos_fijos_por_cargo}
+                      onChange={(e) => setEleccionForm({
+                        ...eleccionForm,
+                        votos_fijos_por_cargo: Math.max(1, parseInt(e.target.value || "1", 10)),
+                      })}
+                    />
+                    <p className="text-xs text-gray-500">
+                      Todos los usuarios seleccionados tendrán esta misma cantidad de votos por cargo.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Usuarios que participarán *</Label>
+                    <Input
+                      placeholder="Buscar por nombre o cédula..."
+                      value={usuarioFijaSearch}
+                      onChange={(e) => setUsuarioFijaSearch(e.target.value)}
+                    />
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={handleSeleccionarTodosFija}>
+                        Seleccionar todos
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={handleLimpiarSeleccionFija}>
+                        Limpiar selección
+                      </Button>
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto border rounded-md p-2 space-y-2">
+                      {usuariosFiltradosFija.length === 0 ? (
+                        <p className="text-sm text-gray-500 px-2 py-4">No se encontraron usuarios.</p>
+                      ) : (
+                        usuariosFiltradosFija.map((u) => (
+                          <label key={u.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-gray-50 cursor-pointer">
+                            <Checkbox
+                              checked={usuariosFijaSeleccionados.includes(u.id)}
+                              onCheckedChange={(checked) => handleToggleUsuarioFija(u.id, checked === true)}
+                            />
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{u.nombre_completo}</span>
+                              <span className="text-xs text-gray-500">Cédula: {u.cedula}</span>
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Participantes seleccionados: <strong>{usuariosFijaSeleccionados.length}</strong>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -457,6 +610,12 @@ function EleccionesPageContent() {
                 <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 text-left w-full mr-4">
                   <span className="font-semibold text-lg">{eleccion.nombre}</span>
                   {getEstadoBadge(eleccion.estado)}
+                  {getTipoBadge(eleccion.tipo)}
+                  {eleccion.tipo === "fija" && (
+                    <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
+                      {eleccion.votos_fijos_por_cargo || 1} voto(s)/cargo
+                    </Badge>
+                  )}
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-6">
@@ -523,28 +682,55 @@ function EleccionesPageContent() {
                   </div>
 
                   {eleccion.link_publico && (
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 bg-gray-50 rounded-lg">
-                      <LinkIcon className="w-4 h-4 text-gray-500 shrink-0" />
-                      <span className="text-sm text-gray-600 flex-1 break-all">
-                        {typeof window !== 'undefined' && window.location.origin}/resultados/{eleccion.link_publico}
-                      </span>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleCopyLink(eleccion.link_publico!)}
-                        >
-                          {copiedLink === eleccion.link_publico ? (
-                            <Check className="w-4 h-4" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Link href={`/resultados/${eleccion.link_publico}`} target="_blank">
-                          <Button size="sm" variant="outline">
-                            <ExternalLink className="w-4 h-4" />
+                    <div className="space-y-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 bg-gray-50 rounded-lg">
+                        <LinkIcon className="w-4 h-4 text-gray-500 shrink-0" />
+                        <span className="text-sm text-gray-600 flex-1 break-all">
+                          {typeof window !== 'undefined' && window.location.origin}/resultados/{eleccion.link_publico}
+                        </span>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleCopyLink(eleccion.link_publico!)}
+                          >
+                            {copiedLink === `resultados-${eleccion.link_publico}` ? (
+                              <Check className="w-4 h-4" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
                           </Button>
-                        </Link>
+                          <Link href={`/resultados/${eleccion.link_publico}`} target="_blank">
+                            <Button size="sm" variant="outline">
+                              <ExternalLink className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <Vote className="w-4 h-4 text-[#11357b] shrink-0" />
+                        <span className="text-sm text-[#11357b] flex-1 break-all">
+                          {typeof window !== 'undefined' && window.location.origin}/votacion/{eleccion.link_publico}
+                        </span>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleCopyVotacionLink(eleccion.link_publico!)}
+                          >
+                            {copiedLink === `votacion-${eleccion.link_publico}` ? (
+                              <Check className="w-4 h-4" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Link href={`/votacion/${eleccion.link_publico}`} target="_blank">
+                            <Button size="sm" className="bg-[#11357b] hover:bg-[#0d2a63]">
+                              Ir a votación
+                            </Button>
+                          </Link>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -553,8 +739,11 @@ function EleccionesPageContent() {
                     <h4 className="font-semibold text-gray-900">Cargos y Candidatos</h4>
                     <div className="text-sm text-gray-500">
                       Usuarios permitidos: {permitidosPorEleccion[eleccion.id]?.length || 0}
-                      {(!permitidosPorEleccion[eleccion.id] || permitidosPorEleccion[eleccion.id].length === 0) && (
+                      {(eleccion.tipo !== "fija" && (!permitidosPorEleccion[eleccion.id] || permitidosPorEleccion[eleccion.id].length === 0)) && (
                         <span> (sin restricciones)</span>
+                      )}
+                      {(eleccion.tipo === "fija" && (!permitidosPorEleccion[eleccion.id] || permitidosPorEleccion[eleccion.id].length === 0)) && (
+                        <span> (sin participantes, nadie puede votar)</span>
                       )}
                     </div>
                     {!cargos[eleccion.id]?.length ? (

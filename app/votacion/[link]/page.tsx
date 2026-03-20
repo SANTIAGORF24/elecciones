@@ -90,7 +90,11 @@ export default function VotacionPublicaPage() {
   const [successVotoDialog, setSuccessVotoDialog] = useState(false)
   const [animatingSuccess, setAnimatingSuccess] = useState(false)
 
-  const votosDisponibles = usuario ? usuario.votos_base + usuario.poderes : 0
+  const votosDisponibles = usuario
+    ? eleccion?.tipo === "fija"
+      ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
+      : usuario.votos_base + usuario.poderes
+    : 0
 
   // Cargar elección al montar
   useEffect(() => {
@@ -197,6 +201,8 @@ export default function VotacionPublicaPage() {
     return votosDisponibles - usados
   }
 
+  const esEleccionFija = eleccion?.tipo === "fija"
+
   const handleOpenConfirmDialog = (cargo: Cargo, candidato: Candidato) => {
     const restantes = getVotosRestantesCargo(cargo.id)
     if (restantes <= 0) return
@@ -207,8 +213,9 @@ export default function VotacionPublicaPage() {
   const handleVotar = async () => {
     if (!confirmDialog.cargo || !confirmDialog.candidato || !eleccion || !usuario) return
 
+    const votosARegistrar = esEleccionFija ? 1 : cantidadVotos
     const restantes = getVotosRestantesCargo(confirmDialog.cargo.id)
-    if (cantidadVotos > restantes || cantidadVotos < 1) return
+    if (votosARegistrar > restantes || votosARegistrar < 1) return
 
     setIsVoting(true)
     
@@ -217,7 +224,7 @@ export default function VotacionPublicaPage() {
       usuario.id,
       confirmDialog.cargo.id,
       confirmDialog.candidato.id,
-      cantidadVotos
+      votosARegistrar
     )
 
     if (error) {
@@ -225,7 +232,7 @@ export default function VotacionPublicaPage() {
     } else {
       setVotosRealizadosPorCargo(prev => ({
         ...prev,
-        [confirmDialog.cargo!.id]: (prev[confirmDialog.cargo!.id] || 0) + cantidadVotos
+        [confirmDialog.cargo!.id]: (prev[confirmDialog.cargo!.id] || 0) + votosARegistrar
       }))
       setSuccessVotoDialog(true)
     }
@@ -428,10 +435,17 @@ export default function VotacionPublicaPage() {
                       </div>
                       <p className="text-[10px] text-white/60 uppercase tracking-wider">votos/cargo</p>
                     </div>
-                    <div className="text-xs text-white/50 text-right">
-                      <p>{usuario.votos_base} base</p>
-                      <p>+ {usuario.poderes} poderes</p>
-                    </div>
+                    {eleccion?.tipo === "fija" ? (
+                      <div className="text-xs text-white/50 text-right">
+                        <p>Elección fija</p>
+                        <p>mismo número para todos</p>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-white/50 text-right">
+                        <p>{usuario.votos_base} base</p>
+                        <p>+ {usuario.poderes} poderes</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -664,7 +678,9 @@ export default function VotacionPublicaPage() {
           <DialogHeader>
             <DialogTitle>Confirmar Voto</DialogTitle>
             <DialogDescription>
-              Selecciona cuántos votos usar para este candidato
+              {esEleccionFija
+                ? "Elección fija: cada clic asigna 1 voto a un candidato distinto hasta completar tu cupo"
+                : "Selecciona cuántos votos usar para este candidato"}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
@@ -688,57 +704,68 @@ export default function VotacionPublicaPage() {
             </div>
 
             {/* Selector de cantidad */}
-            <div className="bg-blue-50 p-4 rounded-xl">
-              <Label className="text-sm font-medium text-gray-700 mb-3 block text-center">
-                ¿Cuántos votos?
-              </Label>
-              <div className="flex items-center justify-center gap-4">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full w-10 h-10"
-                  onClick={() => setCantidadVotos(Math.max(1, cantidadVotos - 1))}
-                  disabled={cantidadVotos <= 1}
-                >
-                  <Minus className="w-4 h-4" />
-                </Button>
-                <div className="text-center">
-                  <span className="text-4xl font-bold text-[#11357b]">{cantidadVotos}</span>
-                  <p className="text-xs text-gray-500 mt-1">
-                    de {confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 0} disponibles
-                  </p>
+            {esEleccionFija ? (
+              <div className="bg-blue-50 p-4 rounded-xl text-center">
+                <Label className="text-sm font-medium text-gray-700 mb-3 block">
+                  En elección fija se asigna 1 voto por candidato
+                </Label>
+                <span className="text-4xl font-bold text-[#11357b]">1</span>
+                <p className="text-xs text-gray-500 mt-1">
+                  Te quedan {confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 0} voto(s) para repartir en este cargo
+                </p>
+              </div>
+            ) : (
+              <div className="bg-blue-50 p-4 rounded-xl">
+                <Label className="text-sm font-medium text-gray-700 mb-3 block text-center">
+                  ¿Cuántos votos?
+                </Label>
+                <div className="flex items-center justify-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full w-10 h-10"
+                    onClick={() => setCantidadVotos(Math.max(1, cantidadVotos - 1))}
+                    disabled={cantidadVotos <= 1}
+                  >
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                  <div className="text-center">
+                    <span className="text-4xl font-bold text-[#11357b]">{cantidadVotos}</span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      de {confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 0} disponibles
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full w-10 h-10"
+                    onClick={() => setCantidadVotos(Math.min(
+                      confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1,
+                      cantidadVotos + 1
+                    ))}
+                    disabled={confirmDialog.cargo ? cantidadVotos >= getVotosRestantesCargo(confirmDialog.cargo.id) : true}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full w-10 h-10"
-                  onClick={() => setCantidadVotos(Math.min(
-                    confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1,
-                    cantidadVotos + 1
-                  ))}
-                  disabled={confirmDialog.cargo ? cantidadVotos >= getVotosRestantesCargo(confirmDialog.cargo.id) : true}
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
+                <div className="flex justify-center gap-2 mt-3">
+                  {[1, Math.ceil((confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1) / 2), confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1]
+                    .filter((v, i, a) => a.indexOf(v) === i && v > 0)
+                    .map(v => (
+                      <Button
+                        key={v}
+                        variant={cantidadVotos === v ? "default" : "outline"}
+                        size="sm"
+                        className={`rounded-full ${cantidadVotos === v ? "bg-[#11357b]" : ""}`}
+                        onClick={() => setCantidadVotos(v)}
+                      >
+                        {v === (confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1) ? `Todos (${v})` : v}
+                      </Button>
+                    ))
+                  }
+                </div>
               </div>
-              {/* Quick select buttons */}
-              <div className="flex justify-center gap-2 mt-3">
-                {[1, Math.ceil((confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1) / 2), confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1]
-                  .filter((v, i, a) => a.indexOf(v) === i && v > 0)
-                  .map(v => (
-                    <Button
-                      key={v}
-                      variant={cantidadVotos === v ? "default" : "outline"}
-                      size="sm"
-                      className={`rounded-full ${cantidadVotos === v ? "bg-[#11357b]" : ""}`}
-                      onClick={() => setCantidadVotos(v)}
-                    >
-                      {v === (confirmDialog.cargo ? getVotosRestantesCargo(confirmDialog.cargo.id) : 1) ? `Todos (${v})` : v}
-                    </Button>
-                  ))
-                }
-              </div>
-            </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setConfirmDialog({open: false, cargo: null, candidato: null})}>
@@ -752,7 +779,10 @@ export default function VotacionPublicaPage() {
               {isVoting ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Votando...</>
               ) : (
-                <><Check className="w-4 h-4 mr-2" /> Confirmar {cantidadVotos} voto(s)</>
+                <>
+                  <Check className="w-4 h-4 mr-2" />
+                  Confirmar {esEleccionFija ? 1 : cantidadVotos} voto(s)
+                </>
               )}
             </Button>
           </DialogFooter>
