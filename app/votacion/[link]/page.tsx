@@ -204,6 +204,14 @@ export default function VotacionPublicaPage() {
         }
       })
       setCandidatosVotadosPorCargo(candidatosMap)
+
+      if (eleccion.tipo === "fija") {
+        const votosMapFija: Record<string, number> = {}
+        Object.entries(candidatosMap).forEach(([cargoId, candidatosIds]) => {
+          votosMapFija[cargoId] = candidatosIds.length
+        })
+        setVotosRealizadosPorCargo(votosMapFija)
+      }
     }
 
     setBuscando(false)

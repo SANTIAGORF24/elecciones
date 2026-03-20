@@ -647,10 +647,9 @@ export async function registrarVotoMultiple(
     return { error: "No se pudo cargar la configuración de la elección" };
   }
 
-  // En elección fija siempre se registra 1 voto por acción (un candidato a la vez).
-  const cantidadSolicitada = eleccion.tipo === "fija" ? 1 : cantidad_votos;
-
   if (eleccion.tipo === "fija") {
+    const cantidadSolicitada = 1;
+
     const { data: votoMismoCandidato } = await supabase
       .from("registro_votos_candidatos")
       .select("id")
@@ -666,9 +665,101 @@ export async function registrarVotoMultiple(
           "En elección fija solo puedes votar una vez por cada candidato en este cargo",
       };
     }
+    const { count, error: conteoError } = await supabase
+      .from("registro_votos_candidatos")
+      .select("id", { head: true, count: "exact" })
+      .eq("eleccion_id", eleccion_id)
+      .eq("usuario_id", usuario_id)
+      .eq("cargo_id", cargo_id);
+
+    if (conteoError) {
+      return { error: conteoError };
+    }
+
+    const totalUsados = count || 0;
+    const votosDisponibles = Math.max(1, eleccion.votos_fijos_por_cargo || 1);
+    const votosRestantes = votosDisponibles - totalUsados;
+
+    if (cantidadSolicitada > votosRestantes) {
+      return {
+        error: `Solo te quedan ${votosRestantes} votos disponibles para este cargo`,
+      };
+    }
+
+    const { error: detalleError } = await supabase
+      .from("registro_votos_candidatos")
+      .insert({
+        eleccion_id,
+        usuario_id,
+        cargo_id,
+        candidato_id,
+        cantidad: 1,
+      });
+
+    if (detalleError) {
+      return { error: detalleError };
+    }
+
+    const { data, error } = await supabase
+      .from("votos_secretos")
+      .insert({
+        eleccion_id,
+        cargo_id,
+        candidato_id,
+        cantidad: cantidadSolicitada,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return { data, error };
+    }
+
+    const { count: totalRegistrado, error: conteoFinalError } = await supabase
+      .from("registro_votos_candidatos")
+      .select("id", { head: true, count: "exact" })
+      .eq("eleccion_id", eleccion_id)
+      .eq("usuario_id", usuario_id)
+      .eq("cargo_id", cargo_id);
+
+    if (conteoFinalError) {
+      return { error: conteoFinalError };
+    }
+
+    const { data: registroExistente } = await supabase
+      .from("registro_votos")
+      .select("id")
+      .eq("eleccion_id", eleccion_id)
+      .eq("usuario_id", usuario_id)
+      .eq("cargo_id", cargo_id)
+      .maybeSingle();
+
+    if (registroExistente) {
+      const { error: updateError } = await supabase
+        .from("registro_votos")
+        .update({ votos_usados: totalRegistrado || 0 })
+        .eq("id", registroExistente.id);
+
+      if (updateError) return { error: updateError };
+    } else {
+      const { error: insertRegistroError } = await supabase
+        .from("registro_votos")
+        .insert({
+          eleccion_id,
+          usuario_id,
+          cargo_id,
+          votos_usados: totalRegistrado || 0,
+        });
+
+      if (insertRegistroError) return { error: insertRegistroError };
+    }
+
+    return { data, error: null };
   }
 
-  // Obtener el usuario para saber sus votos disponibles
+  // Flujo normal (mantiene poderes y acumulado por cargo)
+  const cantidadSolicitada = cantidad_votos;
+
   const { data: usuario } = await supabase
     .from("usuarios")
     .select("votos_base, poderes")
@@ -679,12 +770,8 @@ export async function registrarVotoMultiple(
     return { error: "Usuario no encontrado" };
   }
 
-  const votosDisponibles =
-    eleccion.tipo === "fija"
-      ? Math.max(1, eleccion.votos_fijos_por_cargo || 1)
-      : usuario.votos_base + usuario.poderes;
+  const votosDisponibles = usuario.votos_base + usuario.poderes;
 
-  // Obtener cuántos votos ya usó en este cargo
   const { data: votosUsados } = await supabase
     .from("registro_votos")
     .select("votos_usados")
@@ -706,7 +793,6 @@ export async function registrarVotoMultiple(
     return { error: "Debes usar al menos 1 voto" };
   }
 
-  // Verificar si ya existe un registro para este usuario/cargo/elección
   const { data: registroExistente } = await supabase
     .from("registro_votos")
     .select("id, votos_usados")
@@ -716,7 +802,6 @@ export async function registrarVotoMultiple(
     .single();
 
   if (registroExistente) {
-    // Actualizar el registro existente sumando los nuevos votos
     const { error: updateError } = await supabase
       .from("registro_votos")
       .update({
@@ -726,7 +811,6 @@ export async function registrarVotoMultiple(
 
     if (updateError) return { error: updateError };
   } else {
-    // Crear nuevo registro
     const { error: registroError } = await supabase
       .from("registro_votos")
       .insert({
@@ -739,7 +823,6 @@ export async function registrarVotoMultiple(
     if (registroError) return { error: registroError };
   }
 
-  // Registrar voto secreto (ANÓNIMO)
   const { data, error } = await supabase
     .from("votos_secretos")
     .insert({
@@ -751,27 +834,7 @@ export async function registrarVotoMultiple(
     .select()
     .single();
 
-  if (error) {
-    return { data, error };
-  }
-
-  if (eleccion.tipo === "fija") {
-    const { error: detalleError } = await supabase
-      .from("registro_votos_candidatos")
-      .insert({
-        eleccion_id,
-        usuario_id,
-        cargo_id,
-        candidato_id,
-        cantidad: 1,
-      });
-
-    if (detalleError) {
-      return { error: detalleError };
-    }
-  }
-
-  return { data, error: null };
+  return { data, error };
 }
 
 export async function obtenerCandidatosVotadosPorUsuario(
@@ -851,7 +914,9 @@ export async function obtenerEstadisticasVotacion(eleccion_id: string) {
       .select("usuario_id")
       .eq("eleccion_id", eleccion_id);
 
-    const idsPermitidos = (permitidos || []).map((p: { usuario_id: string }) => p.usuario_id);
+    const idsPermitidos = (permitidos || []).map(
+      (p: { usuario_id: string }) => p.usuario_id,
+    );
 
     if (!idsPermitidos.length) {
       return { data: [], error: null };

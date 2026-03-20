@@ -335,6 +335,9 @@ CREATE POLICY "Ver registro de votos" ON registro_votos
 CREATE POLICY "Insertar registro de votos" ON registro_votos
     FOR INSERT WITH CHECK (true);
 
+CREATE POLICY "Actualizar registro de votos" ON registro_votos
+    FOR UPDATE USING (true) WITH CHECK (true);
+
 -- Política para registro por candidato
 CREATE POLICY "Ver registro por candidato" ON registro_votos_candidatos
     FOR SELECT USING (true);
