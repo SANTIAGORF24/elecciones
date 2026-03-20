@@ -798,14 +798,6 @@ export default function VotacionPublicaPage() {
                   <BarChart3 className="w-5 h-5 mr-2" />
                   Ver Resultados en Vivo
                 </Button>
-                <Button
-                  variant="outline"
-                  className="w-full h-12 text-base"
-                  onClick={handleNuevoVotante}
-                >
-                  <User className="w-5 h-5 mr-2" />
-                  Siguiente Votante
-                </Button>
               </div>
             </div>
           </div>
